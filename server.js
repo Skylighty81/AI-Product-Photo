@@ -8,6 +8,17 @@ app.use(express.json());
 
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const OPENAI_KEY = process.env.OPENAI_KEY;
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL
+});
+
+pool.query("SELECT NOW()")
+  .then(() => {
+    console.log("[DATABASE] PostgreSQL connected successfully");
+  })
+  .catch((error) => {
+    console.error("[DATABASE] PostgreSQL connection failed:", error.message);
+  });
 
 const TELEGRAM_URL = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
 
