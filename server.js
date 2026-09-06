@@ -655,19 +655,53 @@ Please try again in a moment.
       // Real Stars payment comes in the next step.
       // ----------------------------------------------
 
-      if (data.startsWith("buy_")) {
-        await sendMessage(
-          chatId,
-          `
-⭐ <b>Telegram Stars payments are being connected.</b>
+    if (data.startsWith("buy_")) {
+  const packages = {
+    buy_5: {
+      credits: 5,
+      stars: 75,
+      title: "5 AI Product Photos"
+    },
+    buy_15: {
+      credits: 15,
+      stars: 180,
+      title: "15 AI Product Photos"
+    },
+    buy_40: {
+      credits: 40,
+      stars: 390,
+      title: "40 AI Product Photos"
+    }
+  };
 
-Your selected package will be available in the next update.
-`
-        );
+  const selectedPackage = packages[data];
 
-        return;
+  if (!selectedPackage) {
+    await sendMessage(chatId, "⚠️ Package not found.");
+    return;
+  }
+
+  await axios.post(`${TELEGRAM_URL}/sendInvoice`, {
+    chat_id: chatId,
+    title: selectedPackage.title,
+    description: `${selectedPackage.credits} credits for AI product photo generation`,
+    payload: `credits_${selectedPackage.credits}`,
+    provider_token: "",
+    currency: "XTR",
+    prices: [
+      {
+        label: selectedPackage.title,
+        amount: selectedPackage.stars
       }
+    ]
+  });
 
+  console.log(
+    `[PAYMENT] Invoice sent to user ${userId}: ${selectedPackage.credits} credits for ${selectedPackage.stars} Stars`
+  );
+
+  return;
+}
       return;
     }
 
