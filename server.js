@@ -491,6 +491,15 @@ If the problem continues, we'll check the Railway logs.
   );
 
   console.log(`[DATABASE] User ${userId} saved`);
+      
+  const userResult = await pool.query(
+  "SELECT credits FROM users WHERE telegram_id = $1",
+  [userId]
+);
+
+const credits = userResult.rows[0].credits;
+
+console.log(`[DATABASE] User ${userId} balance: ${credits}`);
 
   await showStart(chatId);
 
