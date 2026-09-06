@@ -8,6 +8,7 @@ app.use(express.json());
 
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const OPENAI_KEY = process.env.OPENAI_KEY;
+
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL
 });
