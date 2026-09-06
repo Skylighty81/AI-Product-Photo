@@ -441,6 +441,31 @@ app.post("/webhook", async (req, res) => {
   try {
     const update = req.body;
 
+   // ==================================================
+// TELEGRAM STARS — PRE-CHECKOUT
+// ==================================================
+
+if (update.pre_checkout_query) {
+  const query = update.pre_checkout_query;
+
+  console.log(
+    `[PAYMENT] Pre-checkout from user ${query.from.id}: ${query.invoice_payload}`
+  );
+
+  await axios.post(
+    `${TELEGRAM_URL}/answerPreCheckoutQuery`,
+    {
+      pre_checkout_query_id: query.id,
+      ok: true
+    }
+  );
+
+  console.log(
+    `[PAYMENT] Pre-checkout approved for user ${query.from.id}`
+  );
+
+  return;
+} 
     // ==================================================
     // CALLBACK BUTTONS
     // ==================================================
