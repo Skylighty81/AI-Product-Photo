@@ -441,6 +441,28 @@ This can take around 30–120 seconds.
           log(
             `Generated image sent to user ${userId}`
           );
+  await pool.query(
+  `
+  UPDATE users
+  SET
+    credits = GREATEST(credits - 1, 0),
+    free_generation_used = TRUE,
+    updated_at = CURRENT_TIMESTAMP
+  WHERE telegram_id = $1
+  `,
+  [userId]
+);
+
+const updatedBalanceResult = await pool.query(
+  "SELECT credits FROM users WHERE telegram_id = $1",
+  [userId]
+);
+
+const updatedCredits = updatedBalanceResult.rows[0].credits;
+
+console.log(
+  `[DATABASE] User ${userId} credit used. New balance: ${updatedCredits}`
+);
 
           await sendMessage(
             chatId,
