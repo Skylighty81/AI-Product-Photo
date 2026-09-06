@@ -13,13 +13,28 @@ const pool = new Pool({
   connectionString: process.env.DATABASE_URL
 });
 
-pool.query("SELECT NOW()")
-  .then(() => {
+async function initDatabase() {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        telegram_id BIGINT PRIMARY KEY,
+        username TEXT,
+        first_name TEXT,
+        credits INTEGER NOT NULL DEFAULT 1,
+        free_generation_used BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
     console.log("[DATABASE] PostgreSQL connected successfully");
-  })
-  .catch((error) => {
-    console.error("[DATABASE] PostgreSQL connection failed:", error.message);
-  });
+    console.log("[DATABASE] Users table ready");
+  } catch (error) {
+    console.error("[DATABASE] Initialization failed:", error.message);
+  }
+}
+
+initDatabase();
 
 const TELEGRAM_URL = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
 
