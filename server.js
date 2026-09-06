@@ -1,5 +1,7 @@
 const express = require("express");
 const axios = require("axios");
+const fs = require("fs");
+const path = require("path");
 
 const app = express();
 app.use(express.json());
@@ -9,13 +11,64 @@ const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const OPENAI_KEY = process.env.OPENAI_KEY;
 const TELEGRAM_URL = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
 
-// Simple in-memory storage (Hermes Memory)
-let assetInventory = []; // [{name, ip, cluster, dc, owner, status}]
-let lastTasks = [];
+// Paths for JSON memory
+const DATA_DIR = path.join(__dirname, "data");
+const MEMORY_FILE = path.join(DATA_DIR, "memory.json");
 
-// Logging helper
+// Ensure data directory exists
+if (!fs.existsSync(DATA_DIR)) {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+}
+
+// Load memory from JSON
+let memory = {
+  assets: [],   // [{ name, ip, cluster, dc, owner, status, criticality, env }]
+  tasks: []     // [{ text, date }]
+};
+
+function loadMemory() {
+  try {
+    if (fs.existsSync(MEMORY_FILE)) {
+      const raw = fs.readFileSync(MEMORY_FILE, "utf8");
+      memory = JSON.parse(raw);
+      log("Memory loaded from JSON");
+    } else {
+      saveMemory();
+      log("Memory file created");
+    }
+  } catch (e) {
+    console.error("Error loading memory:", e.message);
+  }
+}
+
+function saveMemory() {
+  try {
+    fs.writeFileSync(MEMORY_FILE, JSON.stringify(memory, null, 2), "utf8");
+    log("Memory saved to JSON");
+  } catch (e) {
+    console.error("Error saving memory:", e.message);
+  }
+}
+
 function log(msg) {
   console.log(`[Hermes LOG] ${msg}`);
+}
+
+// Initialize memory on start
+loadMemory();
+
+// Helper to send messages
+async function send(chatId, text) {
+  await axios.post(`${TELEGRAM_URL}/sendMessage`, {
+    chat_id: chatId,
+    text,
+    parse_mode: "Markdown"
+  });
+}
+
+// Normalize asset name (simple)
+function normalizeName(name) {
+  return name.trim().toLowerCase();
 }
 
 // Webhook endpoint
@@ -24,14 +77,14 @@ app.post("/webhook", async (req, res) => {
   if (!message || !message.text) return res.sendStatus(200);
 
   const chatId = message.chat.id;
-  const userText = message.text;
+  const userText = message.text.trim();
 
   log(`Incoming message: ${userText}`);
 
   // Detect language (RU or EN)
   const isRussian = /[а-яА-Я]/.test(userText);
 
-  // Hermes Passport + Rules + Skills
+  // Hermes Passport (system prompt)
   const hermesPassportRU = `
 Ты — профессиональный AI‑агент Hermes.
 Отвечай на русском языке.
@@ -64,10 +117,13 @@ AI‑инвентаризатор активов и помощник по ауд
 10. Не игнорируй контекст предыдущих сообщений.
 
 Скиллы:
+- /help — показать список команд.
 - /add — добавить актив.
 - /list — показать список активов.
-- /report — сформировать отчёт.
 - /update — обновить статус актива.
+- /report — сформировать отчёт по активам.
+- /status — сводка по состояниям.
+- /find — найти актив.
 - /audit — помощь с SOC2 / PCI DSS / DORA.
 - /jira — помощь со структурами Jira.
 
@@ -107,10 +163,13 @@ Rules:
 10. Never ignore previous context.
 
 Skills:
+- /help — show commands.
 - /add — add asset.
-- /list — show asset list.
-- /report — generate report.
+- /list — show assets.
 - /update — update asset status.
+- /report — generate asset report.
+- /status — status summary.
+- /find — find asset.
 - /audit — help with SOC2 / PCI DSS / DORA.
 - /jira — help with Jira structures.
 
@@ -120,44 +179,237 @@ You store asset list, statuses, last tasks, audit context.
 
   const systemPrompt = isRussian ? hermesPassportRU : hermesPassportEN;
 
-  // Local skill handlers BEFORE sending to OpenAI
+  // ---------- COMMANDS ----------
+
+  // /help
+  if (userText.startsWith("/help")) {
+    const helpText = isRussian
+      ? `
+Доступные команды Hermes:
+
+/help — показать список команд.
+/add <name> — добавить актив (минимум имя).
+/list — показать список активов.
+/update <name> <status> — обновить статус актива.
+/report — сформировать отчёт по активам.
+/status — сводка по состояниям.
+/find <name> — найти актив по имени.
+/audit — помощь с задачами SOC2 / PCI DSS / DORA.
+/jira — помощь со структурами Jira.
+
+Пиши обычным текстом, если хочешь дать задачу, а не команду.
+      `
+      : `
+Available Hermes commands:
+
+/help — show this help.
+/add <name> — add asset (at least name).
+/list — show asset list.
+/update <name> <status> — update asset status.
+/report — generate asset report.
+/status — status summary.
+/find <name> — find asset by name.
+/audit — help with SOC2 / PCI DSS / DORA.
+/jira — help with Jira structures.
+
+Use plain text if you want to give a task, not a command.
+      `;
+    log("Help requested");
+    await send(chatId, helpText);
+    return res.sendStatus(200);
+  }
+
+  // /add <name>
   if (userText.startsWith("/add")) {
     const parts = userText.split(" ").slice(1);
     const name = parts[0];
     if (!name) {
-      return send(chatId, "Укажи имя актива: /add server01");
+      const msg = isRussian
+        ? "Укажи имя актива: `/add server01`"
+        : "Provide asset name: `/add server01`";
+      await send(chatId, msg);
+      return res.sendStatus(200);
     }
-    assetInventory.push({ name, status: "new" });
-    log(`Added asset: ${name}`);
-    return send(chatId, `Актив **${name}** добавлен.`);
-  }
-
-  if (userText.startsWith("/list")) {
-    if (assetInventory.length === 0) {
-      return send(chatId, "Список активов пуст.");
+    const normalized = normalizeName(name);
+    const existing = memory.assets.find(a => a.name === normalized);
+    if (existing) {
+      const msg = isRussian
+        ? `Актив **${name}** уже существует.`
+        : `Asset **${name}** already exists.`;
+      await send(chatId, msg);
+      return res.sendStatus(200);
     }
-    let table = "| Актив | Статус |\n|-------|--------|\n";
-    assetInventory.forEach(a => {
-      table += `| ${a.name} | ${a.status} |\n`;
+    memory.assets.push({
+      name: normalized,
+      status: "new",
+      ip: null,
+      cluster: null,
+      dc: null,
+      owner: null,
+      criticality: null,
+      env: null
     });
-    return send(chatId, table);
+    saveMemory();
+    log(`Added asset: ${normalized}`);
+    const msg = isRussian
+      ? `Актив **${name}** добавлен со статусом \`new\`.`
+      : `Asset **${name}** added with status \`new\`.`;
+    await send(chatId, msg);
+    return res.sendStatus(200);
   }
 
+  // /list
+  if (userText.startsWith("/list")) {
+    if (memory.assets.length === 0) {
+      const msg = isRussian
+        ? "Список активов пуст."
+        : "Asset list is empty.";
+      await send(chatId, msg);
+      return res.sendStatus(200);
+    }
+    let table = isRussian
+      ? "| Актив | Статус | Кластер | DC |\n|-------|--------|---------|----|\n"
+      : "| Asset | Status | Cluster | DC |\n|-------|--------|---------|----|\n";
+    memory.assets.forEach(a => {
+      table += `| ${a.name} | ${a.status || "-"} | ${a.cluster || "-"} | ${a.dc || "-"} |\n`;
+    });
+    await send(chatId, table);
+    return res.sendStatus(200);
+  }
+
+  // /update <name> <status>
   if (userText.startsWith("/update")) {
     const parts = userText.split(" ").slice(1);
     const name = parts[0];
     const status = parts[1];
     if (!name || !status) {
-      return send(chatId, "Используй: /update server01 active");
+      const msg = isRussian
+        ? "Используй: `/update server01 active`"
+        : "Use: `/update server01 active`";
+      await send(chatId, msg);
+      return res.sendStatus(200);
     }
-    const asset = assetInventory.find(a => a.name === name);
-    if (!asset) return send(chatId, "Актив не найден.");
+    const normalized = normalizeName(name);
+    const asset = memory.assets.find(a => a.name === normalized);
+    if (!asset) {
+      const msg = isRussian
+        ? "Актив не найден."
+        : "Asset not found.";
+      await send(chatId, msg);
+      return res.sendStatus(200);
+    }
     asset.status = status;
-    log(`Updated asset ${name} → ${status}`);
-    return send(chatId, `Статус актива **${name}** обновлён на **${status}**.`);
+    saveMemory();
+    log(`Updated asset ${normalized} → ${status}`);
+    const msg = isRussian
+      ? `Статус актива **${name}** обновлён на **${status}**.`
+      : `Status of asset **${name}** updated to **${status}**.`;
+    await send(chatId, msg);
+    return res.sendStatus(200);
   }
 
-  // If no local skill — send to OpenAI
+  // /status
+  if (userText.startsWith("/status")) {
+    const counts = {};
+    memory.assets.forEach(a => {
+      const s = a.status || "unknown";
+      counts[s] = (counts[s] || 0) + 1;
+    });
+    if (Object.keys(counts).length === 0) {
+      const msg = isRussian
+        ? "Нет данных по статусам."
+        : "No status data.";
+      await send(chatId, msg);
+      return res.sendStatus(200);
+    }
+    let table = isRussian
+      ? "| Статус | Кол-во |\n|--------|--------|\n"
+      : "| Status | Count |\n|--------|--------|\n";
+    Object.entries(counts).forEach(([status, count]) => {
+      table += `| ${status} | ${count} |\n`;
+    });
+    await send(chatId, table);
+    return res.sendStatus(200);
+  }
+
+  // /find <name>
+  if (userText.startsWith("/find")) {
+    const parts = userText.split(" ").slice(1);
+    const name = parts[0];
+    if (!name) {
+      const msg = isRussian
+        ? "Укажи имя актива: `/find server01`"
+        : "Provide asset name: `/find server01`";
+      await send(chatId, msg);
+      return res.sendStatus(200);
+    }
+    const normalized = normalizeName(name);
+    const asset = memory.assets.find(a => a.name === normalized);
+    if (!asset) {
+      const msg = isRussian
+        ? "Актив не найден."
+        : "Asset not found.";
+      await send(chatId, msg);
+      return res.sendStatus(200);
+    }
+    let table = isRussian
+      ? "| Поле | Значение |\n|------|----------|\n"
+      : "| Field | Value |\n|-------|--------|\n";
+    table += `| name | ${asset.name} |\n`;
+    table += `| status | ${asset.status || "-"} |\n`;
+    table += `| ip | ${asset.ip || "-"} |\n`;
+    table += `| cluster | ${asset.cluster || "-"} |\n`;
+    table += `| dc | ${asset.dc || "-"} |\n`;
+    table += `| owner | ${asset.owner || "-"} |\n`;
+    table += `| criticality | ${asset.criticality || "-"} |\n`;
+    table += `| env | ${asset.env || "-"} |\n`;
+    await send(chatId, table);
+    return res.sendStatus(200);
+  }
+
+  // /report
+  if (userText.startsWith("/report")) {
+    if (memory.assets.length === 0) {
+      const msg = isRussian
+        ? "Нет активов для отчёта."
+        : "No assets to report.";
+      await send(chatId, msg);
+      return res.sendStatus(200);
+    }
+    let table = isRussian
+      ? "| Актив | Статус | Критичность | Среда |\n|-------|--------|-------------|-------|\n"
+      : "| Asset | Status | Criticality | Env |\n|-------|--------|-------------|-----|\n";
+    memory.assets.forEach(a => {
+      table += `| ${a.name} | ${a.status || "-"} | ${a.criticality || "-"} | ${a.env || "-"} |\n`;
+    });
+    await send(chatId, table);
+    return res.sendStatus(200);
+  }
+
+  // /audit
+  if (userText.startsWith("/audit")) {
+    const msg = isRussian
+      ? "Опиши задачу по аудиту (SOC2 / PCI DSS / DORA), и я помогу структурировать evidence, контрольные вопросы и summary."
+      : "Describe your audit task (SOC2 / PCI DSS / DORA), and I will help structure evidence, control questions, and summary.";
+    await send(chatId, msg);
+    return res.sendStatus(200);
+  }
+
+  // /jira
+  if (userText.startsWith("/jira")) {
+    const msg = isRussian
+      ? "Опиши, для какого процесса или аудита нужна Jira‑структура, и я предложу эпики, задачи и подзадачи."
+      : "Describe which process or audit needs a Jira structure, and I will propose epics, tasks, and subtasks.";
+    await send(chatId, msg);
+    return res.sendStatus(200);
+  }
+
+  // ---------- TEXT TASKS → OpenAI ----------
+
+  // Save task to memory
+  memory.tasks.push({ text: userText, date: new Date().toISOString() });
+  saveMemory();
+
   try {
     const response = await axios.post(
       "https://api.openai.com/v1/chat/completions",
@@ -165,7 +417,10 @@ You store asset list, statuses, last tasks, audit context.
         model: "gpt-4.1",
         messages: [
           { role: "system", content: systemPrompt },
-          { role: "user", content: userText }
+          {
+            role: "user",
+            content: userText
+          }
         ]
       },
       {
@@ -183,20 +438,14 @@ You store asset list, statuses, last tasks, audit context.
 
   } catch (error) {
     console.error("Error:", error.response?.data || error.message);
-    await send(chatId, "⚠️ Error processing request. Please try again.");
+    const msg = isRussian
+      ? "⚠️ Ошибка обработки запроса. Попробуй ещё раз."
+      : "⚠️ Error processing request. Please try again.";
+    await send(chatId, msg);
   }
 
   res.sendStatus(200);
 });
-
-// Helper to send messages
-async function send(chatId, text) {
-  await axios.post(`${TELEGRAM_URL}/sendMessage`, {
-    chat_id: chatId,
-    text,
-    parse_mode: "Markdown"
-  });
-}
 
 // Start server
 app.listen(process.env.PORT || 3000, () =>
