@@ -376,7 +376,31 @@ app.post("/webhook", async (req, res) => {
 
           return;
         }
+const creditResult = await pool.query(
+  "SELECT credits FROM users WHERE telegram_id = $1",
+  [userId]
+);
 
+if (creditResult.rows.length === 0) {
+  await sendMessage(
+    chatId,
+    "⚠️ Please send /start first."
+  );
+  return;
+}
+
+const credits = creditResult.rows[0].credits;
+
+console.log(`[DATABASE] User ${userId} credits before generation: ${credits}`);
+
+if (credits <= 0) {
+  await sendMessage(
+    chatId,
+    "💎 <b>You’re out of credits.</b>\n\nBuy more credits to create another product photo."
+  );
+  return;
+}
+    
         await sendMessage(
           chatId,
           `
