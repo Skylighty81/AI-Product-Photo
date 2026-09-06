@@ -13,6 +13,10 @@ const pool = new Pool({
   connectionString: process.env.DATABASE_URL
 });
 
+// ======================================================
+// DATABASE
+// ======================================================
+
 async function initDatabase() {
   try {
     await pool.query(`
@@ -36,8 +40,14 @@ async function initDatabase() {
 
 initDatabase();
 
+// ======================================================
+// TELEGRAM
+// ======================================================
+
 const TELEGRAM_URL = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
 
+// Temporary session memory.
+// Credits and users are already stored permanently in PostgreSQL.
 const users = {};
 
 function log(message) {
@@ -71,6 +81,10 @@ async function answerCallbackQuery(callbackQueryId) {
   }
 }
 
+// ======================================================
+// START
+// ======================================================
+
 async function showStart(chatId) {
   await sendMessage(
     chatId,
@@ -83,12 +97,16 @@ Turn an ordinary product photo into a professional advertising image.
 
 I'll keep the product recognizable and create a polished commercial scene around it.
 
-<b>Your first generation will be free.</b>
+<b>Your first generation is free.</b>
 
 👇 Send me a product photo to begin.
 `
   );
 }
+
+// ======================================================
+// STYLE SELECTOR
+// ======================================================
 
 async function showStyleSelector(chatId) {
   const keyboard = {
@@ -118,6 +136,10 @@ Now choose the style for your new product photo:
   );
 }
 
+// ======================================================
+// FORMAT SELECTOR
+// ======================================================
+
 async function showFormatSelector(chatId) {
   const keyboard = {
     inline_keyboard: [
@@ -144,15 +166,66 @@ Now choose the image format:
   );
 }
 
+// ======================================================
+// BUY CREDITS
+// ======================================================
+
+async function showBuyCredits(chatId) {
+  const keyboard = {
+    inline_keyboard: [
+      [
+        {
+          text: "⭐ 75 — 5 images",
+          callback_data: "buy_5"
+        }
+      ],
+      [
+        {
+          text: "⭐ 180 — 15 images",
+          callback_data: "buy_15"
+        }
+      ],
+      [
+        {
+          text: "⭐ 390 — 40 images",
+          callback_data: "buy_40"
+        }
+      ]
+    ]
+  };
+
+  await sendMessage(
+    chatId,
+    `
+💎 <b>Buy credits</b>
+
+Choose the package that works for you:
+
+⭐ <b>75 Stars</b> — 5 images
+⭐ <b>180 Stars</b> — 15 images
+⭐ <b>390 Stars</b> — 40 images
+
+Your credits never expire.
+`,
+    keyboard
+  );
+}
+
+// ======================================================
+// IMAGE SIZE
+// ======================================================
+
 function getSize(format) {
   if (format === "square") return "1024x1024";
-
   if (format === "portrait") return "1024x1280";
-
   if (format === "story") return "1024x1792";
 
   return "1024x1024";
 }
+
+// ======================================================
+// STYLE PROMPTS
+// ======================================================
 
 function getStylePrompt(style) {
   const styles = {
@@ -210,15 +283,33 @@ IMPORTANT:
 Preserve the product faithfully.
 
 Do not redesign the product.
-Do not alter its logo, branding, printed artwork, colors, shape, proportions, materials, stitching, texture, labels, or distinctive details.
+
+Do not alter its:
+- logo
+- branding
+- printed artwork
+- colors
+- shape
+- proportions
+- materials
+- stitching
+- texture
+- labels
+- distinctive details
 
 The exact product from the reference image must remain clearly recognizable.
 
-Only improve the presentation, environment, lighting, composition and advertising quality around the product.
+Only improve:
+- presentation
+- environment
+- lighting
+- composition
+- advertising quality
 
 ${getStylePrompt(style)}
 
 The result must look like a professional commercial product photoshoot.
+
 Photorealistic.
 Sharp product details.
 No invented text.
@@ -226,6 +317,10 @@ No extra logos.
 No watermark.
 `;
 }
+
+// ======================================================
+// DOWNLOAD TELEGRAM PHOTO
+// ======================================================
 
 async function downloadTelegramPhoto(fileId) {
   const fileResponse = await axios.get(
@@ -249,6 +344,10 @@ async function downloadTelegramPhoto(fileId) {
   return Buffer.from(imageResponse.data);
 }
 
+// ======================================================
+// OPENAI IMAGE GENERATION
+// ======================================================
+
 async function generateProductPhoto(photoBuffer, style, format) {
   const form = new FormData();
 
@@ -264,14 +363,12 @@ async function generateProductPhoto(photoBuffer, style, format) {
   );
 
   form.append("prompt", buildPrompt(style));
-
   form.append("size", getSize(format));
 
-  // Medium first: good MVP balance between quality and cost.
+  // Good MVP balance between cost and image quality.
   form.append("quality", "medium");
 
   form.append("output_format", "jpeg");
-
   form.append("output_compression", "90");
 
   const response = await axios.post(
@@ -283,7 +380,6 @@ async function generateProductPhoto(photoBuffer, style, format) {
         ...form.getHeaders()
       },
 
-      // Image generation can take a while.
       timeout: 180000,
 
       maxContentLength: Infinity,
@@ -299,6 +395,10 @@ async function generateProductPhoto(photoBuffer, style, format) {
 
   return Buffer.from(imageBase64, "base64");
 }
+
+// ======================================================
+// SEND GENERATED IMAGE
+// ======================================================
 
 async function sendPhoto(chatId, imageBuffer) {
   const form = new FormData();
@@ -330,11 +430,20 @@ async function sendPhoto(chatId, imageBuffer) {
   );
 }
 
+// ======================================================
+// WEBHOOK
+// ======================================================
+
 app.post("/webhook", async (req, res) => {
+  // Telegram should receive HTTP 200 immediately.
   res.sendStatus(200);
 
   try {
     const update = req.body;
+
+    // ==================================================
+    // CALLBACK BUTTONS
+    // ==================================================
 
     if (update.callback_query) {
       const callback = update.callback_query;
@@ -349,6 +458,10 @@ app.post("/webhook", async (req, res) => {
         users[userId] = {};
       }
 
+      // ----------------------------------------------
+      // STYLE
+      // ----------------------------------------------
+
       if (data.startsWith("style_")) {
         const style = data.replace("style_", "");
 
@@ -360,6 +473,10 @@ app.post("/webhook", async (req, res) => {
 
         return;
       }
+
+      // ----------------------------------------------
+      // FORMAT → GENERATE
+      // ----------------------------------------------
 
       if (data.startsWith("format_")) {
         const format = data.replace("format_", "");
@@ -376,31 +493,50 @@ app.post("/webhook", async (req, res) => {
 
           return;
         }
-const creditResult = await pool.query(
-  "SELECT credits FROM users WHERE telegram_id = $1",
-  [userId]
-);
 
-if (creditResult.rows.length === 0) {
-  await sendMessage(
-    chatId,
-    "⚠️ Please send /start first."
-  );
-  return;
-}
+        // --------------------------------------------
+        // CHECK CREDITS
+        // --------------------------------------------
 
-const credits = creditResult.rows[0].credits;
+        const creditResult = await pool.query(
+          "SELECT credits FROM users WHERE telegram_id = $1",
+          [userId]
+        );
 
-console.log(`[DATABASE] User ${userId} credits before generation: ${credits}`);
+        if (creditResult.rows.length === 0) {
+          await sendMessage(
+            chatId,
+            "⚠️ Please send /start first."
+          );
 
-if (credits <= 0) {
-  await sendMessage(
-    chatId,
-    "💎 <b>You’re out of credits.</b>\n\nBuy more credits to create another product photo."
-  );
-  return;
-}
-    
+          return;
+        }
+
+        const credits = creditResult.rows[0].credits;
+
+        console.log(
+          `[DATABASE] User ${userId} credits before generation: ${credits}`
+        );
+
+        // --------------------------------------------
+        // NO CREDITS
+        // --------------------------------------------
+
+        if (credits <= 0) {
+          await sendMessage(
+            chatId,
+            "💎 <b>You’re out of credits.</b>"
+          );
+
+          await showBuyCredits(chatId);
+
+          return;
+        }
+
+        // --------------------------------------------
+        // GENERATION START
+        // --------------------------------------------
+
         await sendMessage(
           chatId,
           `
@@ -418,6 +554,7 @@ This can take around 30–120 seconds.
         );
 
         try {
+          // DOWNLOAD ORIGINAL
           const originalPhoto =
             await downloadTelegramPhoto(user.photoFileId);
 
@@ -425,6 +562,7 @@ This can take around 30–120 seconds.
             `Downloaded Telegram image for user ${userId}`
           );
 
+          // OPENAI GENERATION
           const generatedPhoto =
             await generateProductPhoto(
               originalPhoto,
@@ -436,42 +574,61 @@ This can take around 30–120 seconds.
             `OpenAI generation completed for user ${userId}`
           );
 
+          // SEND RESULT
           await sendPhoto(chatId, generatedPhoto);
 
           log(
             `Generated image sent to user ${userId}`
           );
-  await pool.query(
-  `
-  UPDATE users
-  SET
-    credits = GREATEST(credits - 1, 0),
-    free_generation_used = TRUE,
-    updated_at = CURRENT_TIMESTAMP
-  WHERE telegram_id = $1
-  `,
-  [userId]
-);
 
-const updatedBalanceResult = await pool.query(
-  "SELECT credits FROM users WHERE telegram_id = $1",
-  [userId]
-);
+          // ------------------------------------------
+          // DEDUCT CREDIT ONLY AFTER SUCCESS
+          // ------------------------------------------
 
-const updatedCredits = updatedBalanceResult.rows[0].credits;
+          await pool.query(
+            `
+            UPDATE users
+            SET
+              credits = GREATEST(credits - 1, 0),
+              free_generation_used = TRUE,
+              updated_at = CURRENT_TIMESTAMP
+            WHERE telegram_id = $1
+            `,
+            [userId]
+          );
 
-console.log(
-  `[DATABASE] User ${userId} credit used. New balance: ${updatedCredits}`
-);
+          const updatedBalanceResult = await pool.query(
+            "SELECT credits FROM users WHERE telegram_id = $1",
+            [userId]
+          );
+
+          const updatedCredits =
+            updatedBalanceResult.rows[0].credits;
+
+          console.log(
+            `[DATABASE] User ${userId} credit used. New balance: ${updatedCredits}`
+          );
+
+          // ------------------------------------------
+          // AFTER GENERATION
+          // ------------------------------------------
 
           await sendMessage(
             chatId,
             `
-Want another version?
+✅ Done!
 
-📸 Send another product photo or resend the same one and choose a different style.
+💎 Credits remaining: <b>${updatedCredits}</b>
+
+📸 Send another product photo to create another version.
 `
           );
+
+          // If balance is now zero, immediately show packages.
+          if (updatedCredits <= 0) {
+            await showBuyCredits(chatId);
+          }
+
         } catch (error) {
           console.error(
             "IMAGE GENERATION ERROR:",
@@ -483,9 +640,9 @@ Want another version?
             `
 ⚠️ <b>I couldn't generate the image.</b>
 
-Please try again in a moment.
+Your credit was <b>not charged</b>.
 
-If the problem continues, we'll check the Railway logs.
+Please try again in a moment.
 `
           );
         }
@@ -493,8 +650,30 @@ If the problem continues, we'll check the Railway logs.
         return;
       }
 
+      // ----------------------------------------------
+      // BUY BUTTONS
+      // Real Stars payment comes in the next step.
+      // ----------------------------------------------
+
+      if (data.startsWith("buy_")) {
+        await sendMessage(
+          chatId,
+          `
+⭐ <b>Telegram Stars payments are being connected.</b>
+
+Your selected package will be available in the next update.
+`
+        );
+
+        return;
+      }
+
       return;
     }
+
+    // ==================================================
+    // NORMAL MESSAGE
+    // ==================================================
 
     const message = update.message;
 
@@ -509,48 +688,65 @@ If the problem continues, we'll check the Railway logs.
       users[userId] = {};
     }
 
+    // ==================================================
+    // /START
+    // ==================================================
+
     if (
-  message.text &&
-  message.text.trim().toLowerCase().startsWith("/start")
-) {
-  log(`User ${userId} started the bot`);
+      message.text &&
+      message.text.trim().toLowerCase().startsWith("/start")
+    ) {
+      log(`User ${userId} started the bot`);
 
-  await pool.query(
-    `
-    INSERT INTO users (
-      telegram_id,
-      username,
-      first_name
-    )
-    VALUES ($1, $2, $3)
-    ON CONFLICT (telegram_id)
-    DO UPDATE SET
-      username = EXCLUDED.username,
-      first_name = EXCLUDED.first_name,
-      updated_at = CURRENT_TIMESTAMP
-    `,
-    [
-      userId,
-      message.from.username || null,
-      message.from.first_name || null
-    ]
-  );
+      await pool.query(
+        `
+        INSERT INTO users (
+          telegram_id,
+          username,
+          first_name
+        )
+        VALUES ($1, $2, $3)
 
-  console.log(`[DATABASE] User ${userId} saved`);
-      
-  const userResult = await pool.query(
-  "SELECT credits FROM users WHERE telegram_id = $1",
-  [userId]
-);
+        ON CONFLICT (telegram_id)
 
-const credits = userResult.rows[0].credits;
+        DO UPDATE SET
+          username = EXCLUDED.username,
+          first_name = EXCLUDED.first_name,
+          updated_at = CURRENT_TIMESTAMP
+        `,
+        [
+          userId,
+          message.from.username || null,
+          message.from.first_name || null
+        ]
+      );
 
-console.log(`[DATABASE] User ${userId} balance: ${credits}`);
+      console.log(`[DATABASE] User ${userId} saved`);
 
-  await showStart(chatId);
+      const userResult = await pool.query(
+        "SELECT credits FROM users WHERE telegram_id = $1",
+        [userId]
+      );
 
-  return;
-}
+      const credits = userResult.rows[0].credits;
+
+      console.log(
+        `[DATABASE] User ${userId} balance: ${credits}`
+      );
+
+      await showStart(chatId);
+
+      await sendMessage(
+        chatId,
+        `💎 Your balance: <b>${credits} credit${credits === 1 ? "" : "s"}</b>`
+      );
+
+      return;
+    }
+
+    // ==================================================
+    // PHOTO
+    // ==================================================
 
     if (
       message.photo &&
@@ -574,6 +770,10 @@ console.log(`[DATABASE] User ${userId} balance: ${credits}`);
       return;
     }
 
+    // ==================================================
+    // FALLBACK
+    // ==================================================
+
     await sendMessage(
       chatId,
       `
@@ -582,6 +782,7 @@ console.log(`[DATABASE] User ${userId} balance: ${credits}`);
 I'll turn it into a professional product image.
 `
     );
+
   } catch (error) {
     console.error(
       "Webhook error:",
@@ -590,9 +791,17 @@ I'll turn it into a professional product image.
   }
 });
 
+// ======================================================
+// HEALTH CHECK
+// ======================================================
+
 app.get("/", (req, res) => {
   res.send("AI Product Photo Bot is running.");
 });
+
+// ======================================================
+// SERVER
+// ======================================================
 
 const PORT = process.env.PORT || 3000;
 
