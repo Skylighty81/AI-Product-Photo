@@ -464,15 +464,38 @@ If the problem continues, we'll check the Railway logs.
     }
 
     if (
-      message.text &&
-      message.text.trim().toLowerCase().startsWith("/start")
-    ) {
-      log(`User ${userId} started the bot`);
+  message.text &&
+  message.text.trim().toLowerCase().startsWith("/start")
+) {
+  log(`User ${userId} started the bot`);
 
-      await showStart(chatId);
+  await pool.query(
+    `
+    INSERT INTO users (
+      telegram_id,
+      username,
+      first_name
+    )
+    VALUES ($1, $2, $3)
+    ON CONFLICT (telegram_id)
+    DO UPDATE SET
+      username = EXCLUDED.username,
+      first_name = EXCLUDED.first_name,
+      updated_at = CURRENT_TIMESTAMP
+    `,
+    [
+      userId,
+      message.from.username || null,
+      message.from.first_name || null
+    ]
+  );
 
-      return;
-    }
+  console.log(`[DATABASE] User ${userId} saved`);
+
+  await showStart(chatId);
+
+  return;
+}
 
     if (
       message.photo &&
