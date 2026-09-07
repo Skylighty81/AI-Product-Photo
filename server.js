@@ -63,6 +63,17 @@ function creditWord(count) {
   return count === 1 ? "credit" : "credits";
 }
 
+function getModeName(mode) {
+  const names = {
+    product: "Product Photo",
+    collage: "Ad Collage",
+    person: "Product on Person",
+    social: "Social Media Creative"
+  };
+
+  return names[mode] || "Product Photo";
+}
+
 // ======================================================
 // DATABASE
 // ======================================================
@@ -179,11 +190,18 @@ async function showStart(chatId) {
     `
 ✨ <b>AI Product Photo</b>
 
-Turn an ordinary product photo into a professional advertising image.
+Turn an ordinary product photo into professional advertising content.
 
 📸 Upload a photo of your product.
 
-I'll keep the product recognizable and create a polished commercial scene around it.
+You can create:
+
+✨ Professional product photos
+🖼 Advertising collages
+👤 Product photos with people
+📱 Social media creatives
+
+I'll keep your product recognizable and preserve people in the original photo as closely as possible.
 
 🎁 <b>Your first generation is free.</b>
 
@@ -193,10 +211,70 @@ I'll keep the product recognizable and create a polished commercial scene around
 }
 
 // ======================================================
+// CREATION TYPE SELECTOR
+// ======================================================
+
+async function showCreationTypeSelector(chatId) {
+  const keyboard = {
+    inline_keyboard: [
+      [
+        {
+          text: "📸 Product Photo",
+          callback_data: "mode_product"
+        }
+      ],
+
+      [
+        {
+          text: "🖼 Ad Collage · 3 Photos",
+          callback_data: "mode_collage"
+        }
+      ],
+
+      [
+        {
+          text: "👤 Product on Person",
+          callback_data: "mode_person"
+        }
+      ],
+
+      [
+        {
+          text: "📱 Social Media Creative",
+          callback_data: "mode_social"
+        }
+      ]
+    ]
+  };
+
+  await sendMessage(
+    chatId,
+    `
+✨ <b>What would you like to create?</b>
+
+📸 <b>Product Photo</b>
+A professional advertising product image.
+
+🖼 <b>Ad Collage</b>
+A polished commercial collage with 3 different product shots.
+
+👤 <b>Product on Person</b>
+Best when your original photo already contains a person. Facial features, body proportions and overall identity will be preserved as closely as possible.
+
+📱 <b>Social Media Creative</b>
+Ready-to-post advertising content.
+
+👇 Choose an option:
+`,
+    keyboard
+  );
+}
+
+// ======================================================
 // STYLE SELECTOR
 // ======================================================
 
-async function showStyleSelector(chatId) {
+async function showStyleSelector(chatId, mode) {
   const keyboard = {
     inline_keyboard: [
       [
@@ -230,13 +308,35 @@ async function showStyleSelector(chatId) {
     ]
   };
 
+  let intro = `
+Great. ✅
+
+Now choose the visual style:
+`;
+
+  if (mode === "collage") {
+    intro = `
+🖼 <b>Ad Collage selected</b>
+
+I'll create one professional advertising image containing <b>3 coordinated photo panels</b>.
+
+Now choose the overall visual style:
+`;
+  }
+
+  if (mode === "person") {
+    intro = `
+👤 <b>Product on Person selected</b>
+
+I'll preserve the person's facial identity, body proportions, skin tone, hair and age appearance as closely as possible.
+
+Now choose the advertising style:
+`;
+  }
+
   await sendMessage(
     chatId,
-    `
-Great — I received your product. ✅
-
-Now choose the style for your new product photo:
-`,
+    intro,
     keyboard
   );
 }
@@ -333,12 +433,7 @@ Create professional product photos for your brand, shop or social media.
 ≈ €0.82 per photo
 <b>Best Value</b>
 
-Use your photos for:
-
-📱 Social media
-🛍 Online shops
-📦 Marketplaces
-📣 Advertising
+One generated collage also uses only <b>1 photo credit</b>.
 
 💎 Your photo credits never expire.
 
@@ -375,56 +470,108 @@ function getSize(format) {
 function getStylePrompt(style) {
   const styles = {
     clean: `
-Create a premium clean studio product photograph.
+Create a premium clean studio advertising aesthetic.
 Use a minimal light neutral studio background.
 Soft professional lighting.
 Subtle realistic shadows.
 High-end ecommerce photography.
-No text.
+Elegant and uncluttered.
 `,
 
     luxury: `
-Create a premium luxury advertising photograph.
+Create a premium luxury advertising aesthetic.
 Elegant sophisticated environment.
 Cinematic premium lighting.
-Refined materials and subtle reflections.
-Luxury brand campaign aesthetic.
-No text.
+Refined materials.
+Subtle reflections.
+Luxury brand campaign feeling.
 `,
 
     lifestyle: `
-Create a realistic premium lifestyle advertising photograph.
-Place the product naturally in an attractive real-life setting.
+Create a realistic premium lifestyle advertising aesthetic.
+Place the product naturally in an attractive real-life environment.
 Professional commercial photography.
-Natural lighting.
-No text.
+Natural believable lighting.
 `,
 
     instagram: `
-Create a bold modern social media advertising photograph.
+Create a bold modern social media advertising aesthetic.
 Premium commercial composition suitable for Instagram.
-Dynamic lighting and visually striking background.
+Dynamic lighting.
+Visually striking but tasteful background.
 Professional brand campaign quality.
-No text or captions.
 `,
 
     natural: `
-Create a premium natural organic product photograph.
-Use soft daylight and natural textures.
+Create a premium natural organic advertising aesthetic.
+Use soft daylight.
+Natural textures.
 Elegant earthy atmosphere.
 Professional commercial photography.
-No text.
 `
   };
 
   return styles[style] || styles.clean;
 }
 
-function buildPrompt(style) {
+// ======================================================
+// PERSON PRESERVATION PROMPT
+// ======================================================
+
+function getPersonPreservationPrompt() {
+  return `
+IMPORTANT PERSON PRESERVATION RULE:
+
+If a real person is visible in the uploaded reference image, preserve that person's appearance and identity as faithfully as possible.
+
+Do not redesign, reinterpret or replace the person.
+
+Preserve:
+
+- facial identity
+- face shape
+- eyes
+- eyebrows
+- nose
+- lips
+- jawline
+- skin tone
+- age appearance
+- hairstyle
+- hair color
+- body shape
+- body size
+- body proportions
+- shoulders
+- waist
+- arms
+- legs
+- natural posture characteristics
+
+Do not:
+
+- make the person younger or older
+- make the person thinner or heavier
+- change facial proportions
+- change ethnicity or skin tone
+- change body proportions
+- change recognizable facial features
+- beautify the person into a different-looking person
+- replace the person's face
+
+The person must remain clearly recognizable as the same individual from the reference image.
+`;
+}
+
+// ======================================================
+// PRODUCT PRESERVATION PROMPT
+// ======================================================
+
+function getProductPreservationPrompt() {
   return `
 Use the uploaded image as the exact product reference.
 
-IMPORTANT:
+PRODUCT PRESERVATION IS CRITICAL.
 
 Preserve the product faithfully.
 
@@ -442,27 +589,134 @@ Do not alter:
 - stitching
 - texture
 - labels
-- distinctive details
+- packaging details
+- distinctive design details
+
+Do not invent new branding.
+Do not invent product text.
 
 The exact product from the reference image must remain clearly recognizable.
+`;
+}
 
-Only improve:
+// ======================================================
+// MODE PROMPTS
+// ======================================================
+
+function getModePrompt(mode) {
+  if (mode === "collage") {
+    return `
+CREATE ONE PROFESSIONAL ADVERTISING COLLAGE.
+
+The final output must be ONE single image containing exactly THREE distinct coordinated photographic panels.
+
+The collage should look like a professional commercial campaign created by a brand photographer and art director.
+
+Use the same exact product in all three panels.
+
+Suggested visual structure:
+
+Panel 1:
+A strong hero product shot.
+
+Panel 2:
+A closer detail-oriented product shot showing texture, craftsmanship or an important product feature.
+
+Panel 3:
+A complementary lifestyle, alternative angle or contextual advertising shot.
+
+The three panels should feel visually connected but not identical.
+
+Use professional spacing and composition.
+
+Do not create a random scrapbook.
+Do not create more than 3 panels.
+Do not repeat the exact same framing three times.
+
+No text.
+No captions.
+No prices.
+No watermark.
+No invented logo.
+`;
+  }
+
+  if (mode === "person") {
+    return `
+CREATE A PROFESSIONAL COMMERCIAL PHOTO FEATURING THE PRODUCT AND THE PERSON FROM THE ORIGINAL IMAGE.
+
+The original person must remain the same recognizable person.
+
+Do not replace the model.
+Do not redesign the face.
+Do not redesign the body.
+
+Improve only:
+
+- professional lighting
+- environment
+- composition
+- commercial styling
+- photographic quality
+- background
+- presentation
+
+The result should look like a real professional advertising photoshoot, not an AI-generated replacement person.
+
+No text.
+No watermark.
+`;
+  }
+
+  return `
+CREATE ONE PROFESSIONAL COMMERCIAL PRODUCT PHOTOGRAPH.
+
+Improve only:
 
 - presentation
 - environment
 - lighting
 - composition
 - advertising quality
+- professional photographic finish
+
+The result should look like a real high-end commercial product photoshoot.
+
+No text.
+No captions.
+No watermark.
+`;
+}
+
+// ======================================================
+// BUILD FINAL PROMPT
+// ======================================================
+
+function buildPrompt(mode, style) {
+  return `
+${getProductPreservationPrompt()}
+
+${getPersonPreservationPrompt()}
+
+${getModePrompt(mode)}
+
+VISUAL STYLE:
 
 ${getStylePrompt(style)}
 
-The result must look like a professional commercial product photoshoot.
+FINAL QUALITY REQUIREMENTS:
 
 Photorealistic.
-Sharp product details.
-No invented text.
-No extra logos.
-No watermark.
+Professional commercial photography.
+Sharp important product details.
+Natural realistic lighting.
+Realistic shadows.
+Premium advertising quality.
+
+Do not invent text.
+Do not invent logos.
+Do not distort the product.
+Do not distort a person if visible.
 `;
 }
 
@@ -504,6 +758,7 @@ async function downloadTelegramPhoto(fileId) {
 
 async function generateProductPhoto(
   photoBuffer,
+  mode,
   style,
   format
 ) {
@@ -525,7 +780,7 @@ async function generateProductPhoto(
 
   form.append(
     "prompt",
-    buildPrompt(style)
+    buildPrompt(mode, style)
   );
 
   form.append(
@@ -585,7 +840,8 @@ async function generateProductPhoto(
 
 async function sendPhoto(
   chatId,
-  imageBuffer
+  imageBuffer,
+  mode
 ) {
   const form = new FormData();
 
@@ -603,9 +859,22 @@ async function sendPhoto(
     }
   );
 
+  let caption =
+    "✨ Your AI product photo is ready.";
+
+  if (mode === "collage") {
+    caption =
+      "🖼 Your advertising collage is ready.";
+  }
+
+  if (mode === "person") {
+    caption =
+      "👤 Your professional product photo is ready.";
+  }
+
   form.append(
     "caption",
-    "✨ Your AI product photo is ready."
+    caption
   );
 
   await axios.post(
@@ -651,10 +920,6 @@ app.post(
         );
 
         if (!selectedPackage) {
-          console.error(
-            `[PAYMENT] Unknown pre-checkout payload: ${query.invoice_payload}`
-          );
-
           await axios.post(
             `${TELEGRAM_URL}/answerPreCheckoutQuery`,
             {
@@ -669,10 +934,6 @@ app.post(
         }
 
         if (query.currency !== "XTR") {
-          console.error(
-            `[PAYMENT] Invalid pre-checkout currency: ${query.currency}`
-          );
-
           await axios.post(
             `${TELEGRAM_URL}/answerPreCheckoutQuery`,
             {
@@ -690,10 +951,6 @@ app.post(
           query.total_amount !==
           selectedPackage.stars
         ) {
-          console.error(
-            `[PAYMENT] Invalid pre-checkout amount. Expected ${selectedPackage.stars}, received ${query.total_amount}`
-          );
-
           await axios.post(
             `${TELEGRAM_URL}/answerPreCheckoutQuery`,
             {
@@ -753,20 +1010,14 @@ app.post(
         const chargeId =
           payment.telegram_payment_charge_id;
 
+        const selectedPackage =
+          getPackageByPayload(payload);
+
         console.log(
-          `[PAYMENT] Successful payment received from user ${userId}: ${payload}, ${totalAmount} ${currency}`
+          `[PAYMENT] Successful payment from ${userId}: ${payload}, ${totalAmount} ${currency}`
         );
 
-        const selectedPackage =
-          getPackageByPayload(
-            payload
-          );
-
         if (!selectedPackage) {
-          console.error(
-            `[PAYMENT] Unknown payload from user ${userId}: ${payload}`
-          );
-
           await sendMessage(
             chatId,
             `
@@ -779,37 +1030,16 @@ Please contact support and do not pay again.
           return;
         }
 
-        if (currency !== "XTR") {
-          console.error(
-            `[PAYMENT] Invalid currency from user ${userId}: ${currency}`
-          );
-
-          await sendMessage(
-            chatId,
-            `
-⚠️ Payment currency could not be verified.
-
-Please contact support.
-`
-          );
-
-          return;
-        }
-
         if (
-          totalAmount !==
-          selectedPackage.stars
+          currency !== "XTR" ||
+          totalAmount !== selectedPackage.stars
         ) {
-          console.error(
-            `[PAYMENT] Invalid amount from user ${userId}. Expected ${selectedPackage.stars}, received ${totalAmount}`
-          );
-
           await sendMessage(
             chatId,
             `
-⚠️ Payment amount could not be verified.
+⚠️ Payment could not be verified.
 
-Please contact support.
+Please contact support and do not pay again.
 `
           );
 
@@ -823,13 +1053,7 @@ Please contact support.
         let duplicatePayment = false;
 
         try {
-          await client.query(
-            "BEGIN"
-          );
-
-          // ----------------------------------------------
-          // MAKE SURE USER EXISTS
-          // ----------------------------------------------
+          await client.query("BEGIN");
 
           await client.query(
             `
@@ -845,19 +1069,12 @@ Please contact support.
               $3
             )
 
-            ON CONFLICT (
-              telegram_id
-            )
+            ON CONFLICT (telegram_id)
 
             DO UPDATE SET
-              username =
-                EXCLUDED.username,
-
-              first_name =
-                EXCLUDED.first_name,
-
-              updated_at =
-                CURRENT_TIMESTAMP
+              username = EXCLUDED.username,
+              first_name = EXCLUDED.first_name,
+              updated_at = CURRENT_TIMESTAMP
             `,
             [
               userId,
@@ -865,10 +1082,6 @@ Please contact support.
               message.from.first_name || null
             ]
           );
-
-          // ----------------------------------------------
-          // SAVE PAYMENT
-          // ----------------------------------------------
 
           const paymentInsert =
             await client.query(
@@ -906,48 +1119,19 @@ Please contact support.
               ]
             );
 
-          // ----------------------------------------------
-          // DUPLICATE PAYMENT
-          // ----------------------------------------------
-
           if (
             paymentInsert.rows.length === 0
           ) {
             duplicatePayment = true;
 
-            const balanceResult =
-              await client.query(
-                `
-                SELECT credits
-                FROM users
-                WHERE telegram_id = $1
-                `,
-                [userId]
-              );
-
-            newCredits =
-              balanceResult.rows[0]?.credits ?? 0;
-
-            await client.query(
-              "COMMIT"
-            );
-
           } else {
-
-            // ----------------------------------------------
-            // ADD PURCHASED CREDITS
-            // ----------------------------------------------
-
             await client.query(
               `
               UPDATE users
 
               SET
-                credits =
-                  credits + $1,
-
-                updated_at =
-                  CURRENT_TIMESTAMP
+                credits = credits + $1,
+                updated_at = CURRENT_TIMESTAMP
 
               WHERE telegram_id = $2
               `,
@@ -956,34 +1140,26 @@ Please contact support.
                 userId
               ]
             );
-
-            // ----------------------------------------------
-            // GET NEW BALANCE
-            // ----------------------------------------------
-
-            const balanceResult =
-              await client.query(
-                `
-                SELECT credits
-                FROM users
-                WHERE telegram_id = $1
-                `,
-                [userId]
-              );
-
-            newCredits =
-              balanceResult.rows[0].credits;
-
-            await client.query(
-              "COMMIT"
-            );
           }
+
+          const balanceResult =
+            await client.query(
+              `
+              SELECT credits
+              FROM users
+              WHERE telegram_id = $1
+              `,
+              [userId]
+            );
+
+          newCredits =
+            balanceResult.rows[0]?.credits ?? 0;
+
+          await client.query("COMMIT");
 
         } catch (error) {
           try {
-            await client.query(
-              "ROLLBACK"
-            );
+            await client.query("ROLLBACK");
           } catch (rollbackError) {
             console.error(
               "[PAYMENT] Rollback error:",
@@ -1011,15 +1187,7 @@ Please contact support and do not pay again.
           client.release();
         }
 
-        // ----------------------------------------------
-        // DUPLICATE PAYMENT
-        // ----------------------------------------------
-
         if (duplicatePayment) {
-          console.log(
-            `[PAYMENT] Duplicate payment ignored: ${chargeId}`
-          );
-
           await sendMessage(
             chatId,
             `
@@ -1032,14 +1200,6 @@ Please contact support and do not pay again.
           return;
         }
 
-        // ----------------------------------------------
-        // SUCCESS
-        // ----------------------------------------------
-
-        console.log(
-          `[PAYMENT] User ${userId} received ${selectedPackage.credits} credits. New balance: ${newCredits}`
-        );
-
         await sendMessage(
           chatId,
           `
@@ -1051,7 +1211,7 @@ Please contact support and do not pay again.
 💎 Your new balance:
 <b>${newCredits} ${creditWord(newCredits)}</b>
 
-Send me a product photo to create your next professional image. 📸
+Send me a product photo to continue. 📸
 `
         );
 
@@ -1081,6 +1241,63 @@ Send me a product photo to create your next professional image. 📸
 
         if (!users[userId]) {
           users[userId] = {};
+        }
+
+        // ==================================================
+        // MODE
+        // ==================================================
+
+        if (
+          data.startsWith("mode_")
+        ) {
+          const mode =
+            data.replace(
+              "mode_",
+              ""
+            );
+
+          // ----------------------------------------------
+          // SOCIAL MEDIA — COMING SOON
+          // ----------------------------------------------
+
+          if (mode === "social") {
+            await sendMessage(
+              chatId,
+              `
+📱 <b>Social Media Creative</b>
+
+This mode is coming soon.
+
+For now, you can use <b>Product Photo</b> or <b>Ad Collage</b> to create advertising-ready content.
+`
+            );
+
+            await showCreationTypeSelector(
+              chatId
+            );
+
+            return;
+          }
+
+          users[userId].mode =
+            mode;
+
+          users[userId].style =
+            null;
+
+          users[userId].format =
+            null;
+
+          log(
+            `User ${userId} selected mode: ${mode}`
+          );
+
+          await showStyleSelector(
+            chatId,
+            mode
+          );
+
+          return;
         }
 
         // ==================================================
@@ -1138,6 +1355,23 @@ Send me a product photo to create your next professional image. 📸
             return;
           }
 
+          if (!user.mode) {
+            await showCreationTypeSelector(
+              chatId
+            );
+
+            return;
+          }
+
+          if (!user.style) {
+            await showStyleSelector(
+              chatId,
+              user.mode
+            );
+
+            return;
+          }
+
           // ----------------------------------------------
           // CHECK CREDITS
           // ----------------------------------------------
@@ -1170,17 +1404,13 @@ Send me a product photo to create your next professional image. 📸
             `[DATABASE] User ${userId} credits before generation: ${credits}`
           );
 
-          // ----------------------------------------------
-          // NO CREDITS
-          // ----------------------------------------------
-
           if (credits <= 0) {
             await sendMessage(
               chatId,
               `
 💎 <b>You’re out of photo credits.</b>
 
-Choose a photo pack to continue creating professional product images.
+Choose a photo pack to continue creating professional advertising content.
 `
             );
 
@@ -1198,7 +1428,7 @@ Choose a photo pack to continue creating professional product images.
           await sendMessage(
             chatId,
             `
-⏳ <b>Creating your product photo...</b>
+⏳ <b>Creating your ${getModeName(user.mode)}...</b>
 
 Style: <b>${user.style}</b>
 Format: <b>${format}</b>
@@ -1208,7 +1438,7 @@ This can take around 30–120 seconds.
           );
 
           log(
-            `Generating for user ${userId}: ${user.style}, ${format}`
+            `Generating for user ${userId}: mode=${user.mode}, style=${user.style}, format=${format}`
           );
 
           try {
@@ -1217,32 +1447,22 @@ This can take around 30–120 seconds.
                 user.photoFileId
               );
 
-            log(
-              `Downloaded Telegram image for user ${userId}`
-            );
-
             const generatedPhoto =
               await generateProductPhoto(
                 originalPhoto,
+                user.mode,
                 user.style,
                 format
               );
 
-            log(
-              `OpenAI generation completed for user ${userId}`
-            );
-
             await sendPhoto(
               chatId,
-              generatedPhoto
-            );
-
-            log(
-              `Generated image sent to user ${userId}`
+              generatedPhoto,
+              user.mode
             );
 
             // ----------------------------------------------
-            // DEDUCT CREDIT AFTER SUCCESS
+            // DEDUCT CREDIT
             // ----------------------------------------------
 
             await pool.query(
@@ -1289,9 +1509,9 @@ This can take around 30–120 seconds.
               `
 ✅ <b>Done!</b>
 
-💎 ${photoWord(updatedCredits) === "photo" ? "Photo" : "Photos"} remaining: <b>${updatedCredits}</b>
+💎 Photos remaining: <b>${updatedCredits}</b>
 
-📸 Send another product photo to create another version.
+📸 Send another photo to create something new.
 `
             );
 
@@ -1317,7 +1537,7 @@ This can take around 30–120 seconds.
 
 Your credit was <b>not charged</b>.
 
-Please try again in a moment.
+Please try again.
 `
             );
           }
@@ -1374,10 +1594,6 @@ Please try again in a moment.
             }
           );
 
-          console.log(
-            `[PAYMENT] Invoice sent to user ${userId}: ${selectedPackage.credits} credits for ${selectedPackage.stars} Stars`
-          );
-
           return;
         }
 
@@ -1416,10 +1632,6 @@ Please try again in a moment.
           .toLowerCase()
           .startsWith("/start")
       ) {
-        log(
-          `User ${userId} started the bot`
-        );
-
         await pool.query(
           `
           INSERT INTO users (
@@ -1455,10 +1667,6 @@ Please try again in a moment.
           ]
         );
 
-        console.log(
-          `[DATABASE] User ${userId} saved`
-        );
-
         const userResult =
           await pool.query(
             `
@@ -1472,17 +1680,9 @@ Please try again in a moment.
         const credits =
           userResult.rows[0].credits;
 
-        console.log(
-          `[DATABASE] User ${userId} balance: ${credits}`
-        );
-
         await showStart(
           chatId
         );
-
-        // ==================================================
-        // BALANCE / PURCHASE LOGIC
-        // ==================================================
 
         if (credits > 0) {
           await sendMessage(
@@ -1524,6 +1724,9 @@ Choose a photo pack below to continue creating images.
         users[userId].photoFileId =
           largestPhoto.file_id;
 
+        users[userId].mode =
+          null;
+
         users[userId].style =
           null;
 
@@ -1534,7 +1737,7 @@ Choose a photo pack below to continue creating images.
           `Photo received from user ${userId}`
         );
 
-        await showStyleSelector(
+        await showCreationTypeSelector(
           chatId
         );
 
@@ -1550,7 +1753,7 @@ Choose a photo pack below to continue creating images.
         `
 📸 Please send me a photo of your product.
 
-I'll turn it into a professional advertising image.
+I'll turn it into professional advertising content.
 `
       );
 
