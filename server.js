@@ -16,17 +16,33 @@ const OPENAI_KEY = process.env.OPENAI_KEY;
 const TELEGRAM_URL = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
 
 // ======================================================
+// ADMIN
+// ======================================================
+
+// Temporary test payment command is available only to you.
+const ADMIN_TELEGRAM_ID = 490608293;
+
+// ======================================================
 // PRODUCT PACKAGES
 // ======================================================
 
 const PACKAGES = {
+  // ----------------------------------------------------
+  // TEMPORARY HIDDEN TEST PACKAGE
+  // ----------------------------------------------------
+
   test_1: {
-  credits: 1,
-  stars: 5,
-  title: "Test — 1 AI Product Photo",
-  payload: "test_credit_1",
-  eur: "TEST"
-},
+    credits: 1,
+    stars: 5,
+    title: "Test — 1 AI Product Photo",
+    payload: "test_credit_1",
+    eur: "TEST"
+  },
+
+  // ----------------------------------------------------
+  // PUBLIC PACKAGES
+  // ----------------------------------------------------
+
   buy_7: {
     credits: 7,
     stars: 275,
@@ -145,7 +161,9 @@ async function sendMessage(
   );
 }
 
-async function answerCallbackQuery(callbackQueryId) {
+async function answerCallbackQuery(
+  callbackQueryId
+) {
   try {
     await axios.post(
       `${TELEGRAM_URL}/answerCallbackQuery`,
@@ -153,6 +171,7 @@ async function answerCallbackQuery(callbackQueryId) {
         callback_query_id: callbackQueryId
       }
     );
+
   } catch (error) {
     console.error(
       "answerCallbackQuery error:",
@@ -201,6 +220,7 @@ async function showStyleSelector(chatId) {
           callback_data: "style_luxury"
         }
       ],
+
       [
         {
           text: "🏠 Lifestyle",
@@ -211,6 +231,7 @@ async function showStyleSelector(chatId) {
           callback_data: "style_instagram"
         }
       ],
+
       [
         {
           text: "🌿 Natural",
@@ -244,12 +265,14 @@ async function showFormatSelector(chatId) {
           callback_data: "format_square"
         }
       ],
+
       [
         {
           text: "📱 Instagram 4:5",
           callback_data: "format_portrait"
         }
       ],
+
       [
         {
           text: "🎬 Story / Reels 9:16",
@@ -283,12 +306,14 @@ async function showBuyCredits(chatId) {
           callback_data: "buy_7"
         }
       ],
+
       [
         {
           text: "✨ 20 Photos · 750 Stars · ≈ €17",
           callback_data: "buy_20"
         }
       ],
+
       [
         {
           text: "🔥 50 Photos · 1,800 Stars · ≈ €41",
@@ -328,7 +353,7 @@ Use your photos for:
 
 💎 Your photo credits never expire.
 
-<i>EUR amounts are approximate and based on Telegram Star pricing. Your actual Star purchase price may vary depending on your current balance and available Telegram packages.</i>
+<i>EUR amounts are approximate. Actual Star prices may vary in Telegram.</i>
 `,
     keyboard
   );
@@ -479,7 +504,9 @@ async function downloadTelegramPhoto(fileId) {
     }
   );
 
-  return Buffer.from(imageResponse.data);
+  return Buffer.from(
+    imageResponse.data
+  );
 }
 
 // ======================================================
@@ -597,6 +624,7 @@ async function sendPhoto(
     form,
     {
       headers: form.getHeaders(),
+
       maxContentLength: Infinity,
       maxBodyLength: Infinity
     }
@@ -729,7 +757,9 @@ app.post(
         );
 
         const selectedPackage =
-          getPackageByPayload(payload);
+          getPackageByPayload(
+            payload
+          );
 
         if (!selectedPackage) {
           await sendMessage(
@@ -780,7 +810,13 @@ Please contact support.
         let duplicatePayment = false;
 
         try {
-          await client.query("BEGIN");
+          await client.query(
+            "BEGIN"
+          );
+
+          // ----------------------------------------------
+          // MAKE SURE USER EXISTS
+          // ----------------------------------------------
 
           await client.query(
             `
@@ -816,6 +852,10 @@ Please contact support.
               message.from.first_name || null
             ]
           );
+
+          // ----------------------------------------------
+          // SAVE PAYMENT
+          // ----------------------------------------------
 
           const paymentInsert =
             await client.query(
@@ -853,6 +893,10 @@ Please contact support.
               ]
             );
 
+          // ----------------------------------------------
+          // DUPLICATE PAYMENT
+          // ----------------------------------------------
+
           if (
             paymentInsert.rows.length === 0
           ) {
@@ -871,9 +915,16 @@ Please contact support.
             newCredits =
               balanceResult.rows[0]?.credits ?? 0;
 
-            await client.query("COMMIT");
+            await client.query(
+              "COMMIT"
+            );
 
           } else {
+
+            // ----------------------------------------------
+            // ADD PURCHASED CREDITS
+            // ----------------------------------------------
+
             await client.query(
               `
               UPDATE users
@@ -893,6 +944,10 @@ Please contact support.
               ]
             );
 
+            // ----------------------------------------------
+            // GET NEW BALANCE
+            // ----------------------------------------------
+
             const balanceResult =
               await client.query(
                 `
@@ -906,12 +961,16 @@ Please contact support.
             newCredits =
               balanceResult.rows[0].credits;
 
-            await client.query("COMMIT");
+            await client.query(
+              "COMMIT"
+            );
           }
 
         } catch (error) {
           try {
-            await client.query("ROLLBACK");
+            await client.query(
+              "ROLLBACK"
+            );
           } catch (rollbackError) {
             console.error(
               "[PAYMENT] Rollback error:",
@@ -939,6 +998,10 @@ Please contact support and do not pay again.
           client.release();
         }
 
+        // ----------------------------------------------
+        // DUPLICATE PAYMENT MESSAGE
+        // ----------------------------------------------
+
         if (duplicatePayment) {
           console.log(
             `[PAYMENT] Duplicate payment ignored: ${chargeId}`
@@ -955,6 +1018,10 @@ Please contact support and do not pay again.
 
           return;
         }
+
+        // ----------------------------------------------
+        // SUCCESS
+        // ----------------------------------------------
 
         console.log(
           `[PAYMENT] User ${userId} received ${selectedPackage.credits} credits. New balance: ${newCredits}`
@@ -1058,6 +1125,10 @@ Send me a product photo to create your next professional image. 📸
             return;
           }
 
+          // ----------------------------------------------
+          // CHECK CREDITS
+          // ----------------------------------------------
+
           const creditResult =
             await pool.query(
               `
@@ -1096,10 +1167,16 @@ Choose a photo pack to continue creating professional product images.
 `
             );
 
-            await showBuyCredits(chatId);
+            await showBuyCredits(
+              chatId
+            );
 
             return;
           }
+
+          // ----------------------------------------------
+          // GENERATE
+          // ----------------------------------------------
 
           await sendMessage(
             chatId,
@@ -1146,6 +1223,10 @@ This can take around 30–120 seconds.
             log(
               `Generated image sent to user ${userId}`
             );
+
+            // ----------------------------------------------
+            // DEDUCT 1 CREDIT
+            // ----------------------------------------------
 
             await pool.query(
               `
@@ -1228,7 +1309,7 @@ Please try again in a moment.
         }
 
         // ==================================================
-        // BUY PACKAGE → TELEGRAM STARS INVOICE
+        // PUBLIC BUY PACKAGE
         // ==================================================
 
         if (
@@ -1308,6 +1389,67 @@ Please try again in a moment.
       }
 
       // ==================================================
+      // TEMPORARY HIDDEN TEST PAYMENT
+      // ==================================================
+
+      if (
+        message.text &&
+        message.text
+          .trim()
+          .toLowerCase() === "/testpay"
+      ) {
+
+        // Only your Telegram account can use this command.
+        if (userId !== ADMIN_TELEGRAM_ID) {
+          await sendMessage(
+            chatId,
+            "📸 Please send me a product photo."
+          );
+
+          return;
+        }
+
+        const selectedPackage =
+          PACKAGES.test_1;
+
+        await axios.post(
+          `${TELEGRAM_URL}/sendInvoice`,
+          {
+            chat_id: chatId,
+
+            title:
+              selectedPackage.title,
+
+            description:
+              "Temporary payment test — adds 1 photo credit",
+
+            payload:
+              selectedPackage.payload,
+
+            provider_token: "",
+
+            currency: "XTR",
+
+            prices: [
+              {
+                label:
+                  "1 Test Photo Credit",
+
+                amount:
+                  selectedPackage.stars
+              }
+            ]
+          }
+        );
+
+        console.log(
+          `[PAYMENT TEST] Test invoice sent to user ${userId}: 1 credit for 5 Stars`
+        );
+
+        return;
+      }
+
+      // ==================================================
       // /START
       // ==================================================
 
@@ -1378,7 +1520,9 @@ Please try again in a moment.
           `[DATABASE] User ${userId} balance: ${credits}`
         );
 
-        await showStart(chatId);
+        await showStart(
+          chatId
+        );
 
         // ==================================================
         // BALANCE / PURCHASE LOGIC
