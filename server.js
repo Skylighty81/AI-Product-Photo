@@ -115,7 +115,7 @@ async function answerCallbackQuery(callbackQueryId) {
 }
 
 // ======================================================
-// START
+// START SCREEN
 // ======================================================
 
 async function showStart(chatId) {
@@ -224,7 +224,7 @@ Now choose the image format:
 }
 
 // ======================================================
-// BUY CREDITS
+// BUY CREDITS SCREEN
 // ======================================================
 
 async function showBuyCredits(chatId) {
@@ -547,14 +547,14 @@ app.post(
   "/webhook",
   async (req, res) => {
 
-    // Telegram should receive HTTP 200 immediately
+    // Telegram gets HTTP 200 immediately.
     res.sendStatus(200);
 
     try {
       const update = req.body;
 
       // ==================================================
-      // TELEGRAM STARS PRE-CHECKOUT
+      // TELEGRAM STARS — PRE-CHECKOUT
       // ==================================================
 
       if (update.pre_checkout_query) {
@@ -578,6 +578,350 @@ app.post(
         console.log(
           `[PAYMENT] Pre-checkout approved for user ${query.from.id}`
         );
+
+        return;
+      }
+
+      // ==================================================
+      // TELEGRAM STARS — SUCCESSFUL PAYMENT
+      // ==================================================
+
+      if (update.message?.successful_payment) {
+        const message =
+          update.message;
+
+        const chatId =
+          message.chat.id;
+
+        const userId =
+          message.from.id;
+
+        const payment =
+          message.successful_payment;
+
+        const currency =
+          payment.currency;
+
+        const totalAmount =
+          payment.total_amount;
+
+        const payload =
+          payment.invoice_payload;
+
+        const chargeId =
+          payment.telegram_payment_charge_id;
+
+        console.log(
+          `[PAYMENT] Successful payment received from user ${userId}: ${payload}, ${totalAmount} ${currency}`
+        );
+
+        const packages = {
+
+          credits_5: {
+            credits: 5,
+            stars: 75
+          },
+
+          credits_15: {
+            credits: 15,
+            stars: 180
+          },
+
+          credits_40: {
+            credits: 40,
+            stars: 390
+          }
+        };
+
+        const selectedPackage =
+          packages[payload];
+
+        // ----------------------------------------------
+        // SAFETY CHECK 1 — KNOWN PACKAGE
+        // ----------------------------------------------
+
+        if (!selectedPackage) {
+          console.error(
+            `[PAYMENT] Unknown payload from user ${userId}: ${payload}`
+          );
+
+          await sendMessage(
+            chatId,
+            `
+⚠️ <b>Payment received, but the package could not be identified.</b>
+
+Please contact support and do not pay again.
+`
+          );
+
+          return;
+        }
+
+        // ----------------------------------------------
+        // SAFETY CHECK 2 — CURRENCY
+        // ----------------------------------------------
+
+        if (currency !== "XTR") {
+          console.error(
+            `[PAYMENT] Invalid currency from user ${userId}: ${currency}`
+          );
+
+          await sendMessage(
+            chatId,
+            `
+⚠️ Payment currency could not be verified.
+
+Please contact support.
+`
+          );
+
+          return;
+        }
+
+        // ----------------------------------------------
+        // SAFETY CHECK 3 — AMOUNT
+        // ----------------------------------------------
+
+        if (
+          totalAmount !==
+          selectedPackage.stars
+        ) {
+          console.error(
+            `[PAYMENT] Invalid amount from user ${userId}. Expected ${selectedPackage.stars}, received ${totalAmount}`
+          );
+
+          await sendMessage(
+            chatId,
+            `
+⚠️ Payment amount could not be verified.
+
+Please contact support.
+`
+          );
+
+          return;
+        }
+
+        const client =
+          await pool.connect();
+
+        try {
+          await client.query(
+            "BEGIN"
+          );
+
+          // ----------------------------------------------
+          // DUPLICATE PAYMENT PROTECTION
+          // ----------------------------------------------
+
+          const existingPayment =
+            await client.query(
+              `
+              SELECT id
+              FROM payments
+              WHERE telegram_payment_charge_id = $1
+              `,
+              [chargeId]
+            );
+
+          if (
+            existingPayment.rows.length > 0
+          ) {
+            await client.query(
+              "ROLLBACK"
+            );
+
+            console.log(
+              `[PAYMENT] Duplicate payment ignored: ${chargeId}`
+            );
+
+            const balanceResult =
+              await pool.query(
+                `
+                SELECT credits
+                FROM users
+                WHERE telegram_id = $1
+                `,
+                [userId]
+              );
+
+            const currentCredits =
+              balanceResult.rows[0]?.credits ?? 0;
+
+            await sendMessage(
+              chatId,
+              `
+✅ This payment was already processed.
+
+💎 Your balance: <b>${currentCredits} credits</b>
+`
+            );
+
+            return;
+          }
+
+          // ----------------------------------------------
+          // MAKE SURE USER EXISTS
+          // ----------------------------------------------
+
+          await client.query(
+            `
+            INSERT INTO users (
+              telegram_id,
+              username,
+              first_name
+            )
+
+            VALUES (
+              $1,
+              $2,
+              $3
+            )
+
+            ON CONFLICT (
+              telegram_id
+            )
+
+            DO UPDATE SET
+              username =
+                EXCLUDED.username,
+
+              first_name =
+                EXCLUDED.first_name,
+
+              updated_at =
+                CURRENT_TIMESTAMP
+            `,
+            [
+              userId,
+              message.from.username ||
+                null,
+              message.from.first_name ||
+                null
+            ]
+          );
+
+          // ----------------------------------------------
+          // SAVE PAYMENT
+          // ----------------------------------------------
+
+          await client.query(
+            `
+            INSERT INTO payments (
+              telegram_id,
+              stars,
+              credits_added,
+              invoice_payload,
+              telegram_payment_charge_id
+            )
+
+            VALUES (
+              $1,
+              $2,
+              $3,
+              $4,
+              $5
+            )
+            `,
+            [
+              userId,
+              totalAmount,
+              selectedPackage.credits,
+              payload,
+              chargeId
+            ]
+          );
+
+          // ----------------------------------------------
+          // ADD CREDITS
+          // ----------------------------------------------
+
+          await client.query(
+            `
+            UPDATE users
+
+            SET
+              credits =
+                credits + $1,
+
+              updated_at =
+                CURRENT_TIMESTAMP
+
+            WHERE telegram_id = $2
+            `,
+            [
+              selectedPackage.credits,
+              userId
+            ]
+          );
+
+          // ----------------------------------------------
+          // GET NEW BALANCE
+          // ----------------------------------------------
+
+          const balanceResult =
+            await client.query(
+              `
+              SELECT credits
+              FROM users
+              WHERE telegram_id = $1
+              `,
+              [userId]
+            );
+
+          const newCredits =
+            balanceResult
+              .rows[0]
+              .credits;
+
+          // ----------------------------------------------
+          // COMMIT TRANSACTION
+          // ----------------------------------------------
+
+          await client.query(
+            "COMMIT"
+          );
+
+          console.log(
+            `[PAYMENT] User ${userId} received ${selectedPackage.credits} credits. New balance: ${newCredits}`
+          );
+
+          await sendMessage(
+            chatId,
+            `
+✅ <b>Payment successful!</b>
+
+⭐ Paid: <b>${totalAmount} Stars</b>
+💎 Added: <b>${selectedPackage.credits} credits</b>
+
+Your new balance: <b>${newCredits} credits</b>
+
+📸 Send me a product photo to continue.
+`
+          );
+
+        } catch (error) {
+          await client.query(
+            "ROLLBACK"
+          );
+
+          console.error(
+            "[PAYMENT] Processing error:",
+            error.message
+          );
+
+          await sendMessage(
+            chatId,
+            `
+⚠️ <b>Your payment was received, but credits could not be added automatically.</b>
+
+Please contact support and do not pay again.
+`
+          );
+
+        } finally {
+          client.release();
+        }
 
         return;
       }
@@ -664,9 +1008,9 @@ app.post(
             return;
           }
 
-          // ==================================================
+          // ----------------------------------------------
           // CHECK CREDITS
-          // ==================================================
+          // ----------------------------------------------
 
           const creditResult =
             await pool.query(
@@ -690,15 +1034,17 @@ app.post(
           }
 
           const credits =
-            creditResult.rows[0].credits;
+            creditResult
+              .rows[0]
+              .credits;
 
           console.log(
             `[DATABASE] User ${userId} credits before generation: ${credits}`
           );
 
-          // ==================================================
+          // ----------------------------------------------
           // NO CREDITS
-          // ==================================================
+          // ----------------------------------------------
 
           if (
             credits <= 0
@@ -715,9 +1061,9 @@ app.post(
             return;
           }
 
-          // ==================================================
-          // GENERATE
-          // ==================================================
+          // ----------------------------------------------
+          // GENERATION
+          // ----------------------------------------------
 
           await sendMessage(
             chatId,
@@ -765,17 +1111,27 @@ This can take around 30–120 seconds.
               `Generated image sent to user ${userId}`
             );
 
-            // ==================================================
+            // ----------------------------------------------
             // DEDUCT CREDIT ONLY AFTER SUCCESS
-            // ==================================================
+            // ----------------------------------------------
 
             await pool.query(
               `
               UPDATE users
+
               SET
-                credits = GREATEST(credits - 1, 0),
-                free_generation_used = TRUE,
-                updated_at = CURRENT_TIMESTAMP
+                credits =
+                  GREATEST(
+                    credits - 1,
+                    0
+                  ),
+
+                free_generation_used =
+                  TRUE,
+
+                updated_at =
+                  CURRENT_TIMESTAMP
+
               WHERE telegram_id = $1
               `,
               [userId]
@@ -799,10 +1155,6 @@ This can take around 30–120 seconds.
             console.log(
               `[DATABASE] User ${userId} credit used. New balance: ${updatedCredits}`
             );
-
-            // ==================================================
-            // AFTER GENERATION
-            // ==================================================
 
             await sendMessage(
               chatId,
@@ -846,7 +1198,7 @@ Please try again in a moment.
         }
 
         // ==================================================
-        // BUY CREDITS → TELEGRAM STARS
+        // BUY CREDITS → TELEGRAM STARS INVOICE
         // ==================================================
 
         if (
