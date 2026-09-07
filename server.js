@@ -1047,6 +1047,9 @@ Please contact support and do not pay again.
 💎 Your balance: <b>${newCredits} credits</b>
 `
           );
+  if (credits <= 0) {
+  await showBuyCredits(chatId);
+}
 
           return;
         }
