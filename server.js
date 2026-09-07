@@ -24,25 +24,31 @@ const PACKAGES = {
   buy_7: {
     credits: 7,
     stars: 275,
-    title: "Starter — 7 AI Product Photos",
     payload: "credits_7",
-    eur: "≈ €6.25"
+    eur: "≈ €6.25",
+
+    title_en: "Starter — 7 AI Product Photos",
+    title_ru: "Starter — 7 AI фото товара"
   },
 
   buy_20: {
     credits: 20,
     stars: 750,
-    title: "Creator — 20 AI Product Photos",
     payload: "credits_20",
-    eur: "≈ €17"
+    eur: "≈ €17",
+
+    title_en: "Creator — 20 AI Product Photos",
+    title_ru: "Creator — 20 AI фото товара"
   },
 
   buy_50: {
     credits: 50,
     stars: 1800,
-    title: "Business — 50 AI Product Photos",
     payload: "credits_50",
-    eur: "≈ €41"
+    eur: "≈ €41",
+
+    title_en: "Business — 50 AI Product Photos",
+    title_ru: "Business — 50 AI фото товара"
   }
 };
 
@@ -64,22 +70,68 @@ function creditWord(count) {
   return count === 1 ? "credit" : "credits";
 }
 
-function referenceWord(count) {
-  return count === 1
-    ? "reference photo"
-    : "reference photos";
+function ruPhotoWord(count) {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+
+  if (
+    mod10 === 1 &&
+    mod100 !== 11
+  ) {
+    return "фото";
+  }
+
+  return "фото";
 }
 
-function getModeName(mode) {
+function ruCreditWord(count) {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+
+  if (
+    mod10 === 1 &&
+    mod100 !== 11
+  ) {
+    return "кредит";
+  }
+
+  if (
+    mod10 >= 2 &&
+    mod10 <= 4 &&
+    !(
+      mod100 >= 12 &&
+      mod100 <= 14
+    )
+  ) {
+    return "кредита";
+  }
+
+  return "кредитов";
+}
+
+function getModeName(mode, lang = "en") {
   const names = {
-    product: "Product Photo",
-    collage: "Ad Collage",
-    fashion: "Fashion Collage",
-    person: "Product on Person",
-    social: "Social Media Creative"
+    en: {
+      product: "Product Photo",
+      collage: "Ad Collage",
+      fashion: "Fashion Collage",
+      person: "Product on Person",
+      social: "Social Media Creative"
+    },
+
+    ru: {
+      product: "Фото товара",
+      collage: "Рекламный коллаж",
+      fashion: "Fashion-коллаж",
+      person: "Товар на человеке",
+      social: "Креатив для соцсетей"
+    }
   };
 
-  return names[mode] || "Product Photo";
+  return (
+    names[lang]?.[mode] ||
+    names.en.product
+  );
 }
 
 // ======================================================
@@ -99,9 +151,17 @@ async function initDatabase() {
         first_name TEXT,
         credits INTEGER NOT NULL DEFAULT 1,
         free_generation_used BOOLEAN NOT NULL DEFAULT FALSE,
+        language TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
+    `);
+
+    // Existing installations may already have the table
+    // without the language column.
+    await pool.query(`
+      ALTER TABLE users
+      ADD COLUMN IF NOT EXISTS language TEXT
     `);
 
     await pool.query(`
@@ -125,6 +185,10 @@ async function initDatabase() {
     );
 
     console.log(
+      "[DATABASE] Language column ready"
+    );
+
+    console.log(
       "[DATABASE] Payments table ready"
     );
 
@@ -139,14 +203,10 @@ async function initDatabase() {
 initDatabase();
 
 // ======================================================
-// TEMPORARY SESSION MEMORY
+// SESSION MEMORY
 // ======================================================
 
 const users = {};
-
-// ======================================================
-// SESSION HELPER
-// ======================================================
 
 function getSession(userId) {
   if (!users[userId]) {
@@ -166,6 +226,115 @@ function resetCreativeSettings(session) {
   session.mode = null;
   session.style = null;
   session.format = null;
+}
+
+// ======================================================
+// DATABASE USER HELPERS
+// ======================================================
+
+async function ensureUser(message) {
+  const userId = message.from.id;
+
+  await pool.query(
+    `
+    INSERT INTO users (
+      telegram_id,
+      username,
+      first_name
+    )
+
+    VALUES (
+      $1,
+      $2,
+      $3
+    )
+
+    ON CONFLICT (
+      telegram_id
+    )
+
+    DO UPDATE SET
+      username =
+        EXCLUDED.username,
+
+      first_name =
+        EXCLUDED.first_name,
+
+      updated_at =
+        CURRENT_TIMESTAMP
+    `,
+    [
+      userId,
+      message.from.username || null,
+      message.from.first_name || null
+    ]
+  );
+}
+
+async function getUserData(userId) {
+  const result =
+    await pool.query(
+      `
+      SELECT
+        credits,
+        language
+
+      FROM users
+
+      WHERE
+        telegram_id = $1
+      `,
+      [userId]
+    );
+
+  return (
+    result.rows[0] || {
+      credits: 0,
+      language: null
+    }
+  );
+}
+
+async function getUserLanguage(userId) {
+  const result =
+    await pool.query(
+      `
+      SELECT language
+
+      FROM users
+
+      WHERE
+        telegram_id = $1
+      `,
+      [userId]
+    );
+
+  return (
+    result.rows[0]?.language ||
+    "en"
+  );
+}
+
+async function setUserLanguage(
+  userId,
+  language
+) {
+  await pool.query(
+    `
+    UPDATE users
+
+    SET
+      language = $1,
+      updated_at = CURRENT_TIMESTAMP
+
+    WHERE
+      telegram_id = $2
+    `,
+    [
+      language,
+      userId
+    ]
+  );
 }
 
 // ======================================================
@@ -194,7 +363,8 @@ async function sendMessage(
   };
 
   if (replyMarkup) {
-    payload.reply_markup = replyMarkup;
+    payload.reply_markup =
+      replyMarkup;
   }
 
   return axios.post(
@@ -225,10 +395,82 @@ async function answerCallbackQuery(
 }
 
 // ======================================================
-// START SCREEN
+// LANGUAGE SELECTOR
 // ======================================================
 
-async function showStart(chatId) {
+async function showLanguageSelector(
+  chatId
+) {
+  await sendMessage(
+    chatId,
+    `
+🌐 <b>Choose your language</b>
+
+🌐 <b>Выберите язык</b>
+`,
+    {
+      inline_keyboard: [
+        [
+          {
+            text: "🇬🇧 English",
+            callback_data: "lang_en"
+          },
+
+          {
+            text: "🇷🇺 Русский",
+            callback_data: "lang_ru"
+          }
+        ]
+      ]
+    }
+  );
+}
+
+// ======================================================
+// START
+// ======================================================
+
+async function showStart(
+  chatId,
+  lang
+) {
+  if (lang === "ru") {
+    await sendMessage(
+      chatId,
+      `
+✨ <b>AI Product Photo</b>
+
+Превратите обычные фотографии товара в профессиональный рекламный контент.
+
+📸 Загрузите <b>1–3 фотографии</b> товара.
+
+Дополнительные фото можно использовать, чтобы показать:
+
+• вид спереди
+• вид сзади
+• упаковку
+• детали
+• другой ракурс
+
+Можно создать:
+
+📸 Профессиональное фото товара
+🖼 Рекламный коллаж
+👗 Fashion-коллаж
+👤 Товар на человеке
+📱 Креатив для социальных сетей
+
+Я постараюсь максимально точно сохранить сам товар и внешность человека на исходной фотографии.
+
+🎁 <b>Первая генерация бесплатно.</b>
+
+👇 Отправьте первую фотографию товара.
+`
+    );
+
+    return;
+  }
+
   await sendMessage(
     chatId,
     `
@@ -238,7 +480,7 @@ Turn ordinary product photos into professional advertising content.
 
 📸 Upload <b>1–3 photos</b> of your product.
 
-You can use extra photos to show:
+Extra photos can show:
 
 • front view
 • back view
@@ -246,7 +488,7 @@ You can use extra photos to show:
 • important details
 • another angle
 
-Then create:
+You can create:
 
 📸 Professional Product Photos
 🖼 Advertising Collages
@@ -264,12 +506,66 @@ I'll preserve the real product and keep people recognizable as closely as possib
 }
 
 // ======================================================
-// REFERENCE PHOTO OPTIONS
+// BALANCE
+// ======================================================
+
+async function showBalanceOrPackages(
+  chatId,
+  credits,
+  lang
+) {
+  if (credits > 0) {
+    if (lang === "ru") {
+      await sendMessage(
+        chatId,
+        `💎 Ваш баланс: <b>${credits} ${ruCreditWord(credits)}</b>`
+      );
+
+      return;
+    }
+
+    await sendMessage(
+      chatId,
+      `💎 Your balance: <b>${credits} ${creditWord(credits)}</b>`
+    );
+
+    return;
+  }
+
+  if (lang === "ru") {
+    await sendMessage(
+      chatId,
+      `
+💎 Сейчас у вас <b>0 кредитов</b>.
+
+Выберите пакет, чтобы продолжить.
+`
+    );
+  } else {
+    await sendMessage(
+      chatId,
+      `
+💎 You currently have <b>0 photo credits</b>.
+
+Choose a photo pack below to continue.
+`
+    );
+  }
+
+  await showBuyCredits(
+    chatId,
+    lang
+  );
+}
+
+// ======================================================
+// REFERENCE OPTIONS
 // ======================================================
 
 async function showReferenceOptions(
   chatId,
-  count
+  count,
+  lang
 ) {
   const keyboard = {
     inline_keyboard: []
@@ -279,7 +575,10 @@ async function showReferenceOptions(
     keyboard.inline_keyboard.push([
       {
         text:
-          "➕ Add another reference photo",
+          lang === "ru"
+            ? "➕ Добавить ещё фото"
+            : "➕ Add another reference photo",
+
         callback_data:
           "refs_add"
       }
@@ -289,11 +588,49 @@ async function showReferenceOptions(
   keyboard.inline_keyboard.push([
     {
       text:
-        `✅ Continue with ${count} ${photoWord(count)}`,
+        lang === "ru"
+          ? `✅ Продолжить (${count})`
+          : `✅ Continue with ${count}`,
+
       callback_data:
         "refs_done"
     }
   ]);
+
+  if (lang === "ru") {
+    let tip = "";
+
+    if (count === 1) {
+      tip = `
+Можно продолжить сейчас или добавить ещё один ракурс.
+
+Например:
+<b>перед + спина</b>
+или
+<b>товар целиком + деталь</b>
+`;
+    }
+
+    if (count === 2) {
+      tip = `
+Отлично. Можно продолжить или добавить последнюю фотографию детали / ракурса.
+`;
+    }
+
+    await sendMessage(
+      chatId,
+      `
+✅ <b>Сохранено фото: ${count}.</b>
+
+${tip}
+
+Можно использовать до <b>3 референсных фотографий</b>.
+`,
+      keyboard
+    );
+
+    return;
+  }
 
   let tip = "";
 
@@ -317,7 +654,7 @@ Great. You can continue now or add one final detail/reference photo.
   await sendMessage(
     chatId,
     `
-✅ <b>${count} ${referenceWord(count)} saved.</b>
+✅ <b>${count} reference ${photoWord(count)} saved.</b>
 
 ${tip}
 
@@ -328,60 +665,78 @@ You can use up to <b>3 reference photos</b>.
 }
 
 // ======================================================
-// CREATION TYPE SELECTOR
+// CREATION TYPE
 // ======================================================
 
 async function showCreationTypeSelector(
-  chatId
+  chatId,
+  lang
 ) {
-  const keyboard = {
-    inline_keyboard: [
-      [
-        {
-          text:
-            "📸 Product Photo",
-          callback_data:
-            "mode_product"
-        }
-      ],
+  if (lang === "ru") {
+    await sendMessage(
+      chatId,
+      `
+✨ <b>Что вы хотите создать?</b>
 
-      [
-        {
-          text:
-            "🖼 Ad Collage · 3 Shots",
-          callback_data:
-            "mode_collage"
-        }
-      ],
+📸 <b>Фото товара</b>
+Одно профессиональное рекламное изображение.
 
-      [
-        {
-          text:
-            "👗 Fashion Collage",
-          callback_data:
-            "mode_fashion"
-        }
-      ],
+🖼 <b>Рекламный коллаж</b>
+Три согласованных рекламных кадра в одном изображении.
 
-      [
-        {
-          text:
-            "👤 Product on Person",
-          callback_data:
-            "mode_person"
-        }
-      ],
+👗 <b>Fashion-коллаж</b>
+Для одежды, аксессуаров и fashion-товаров.
 
-      [
-        {
-          text:
-            "📱 Social Media Creative",
-          callback_data:
-            "mode_social"
-        }
-      ]
-    ]
-  };
+👤 <b>Товар на человеке</b>
+Максимально сохраняет лицо, тело и внешность человека.
+
+📱 <b>Креатив для соцсетей</b>
+Готовый визуал для Instagram, Stories или рекламы.
+
+👇 Выберите вариант:
+`,
+      {
+        inline_keyboard: [
+          [
+            {
+              text: "📸 Фото товара",
+              callback_data: "mode_product"
+            }
+          ],
+
+          [
+            {
+              text: "🖼 Рекламный коллаж · 3 кадра",
+              callback_data: "mode_collage"
+            }
+          ],
+
+          [
+            {
+              text: "👗 Fashion-коллаж",
+              callback_data: "mode_fashion"
+            }
+          ],
+
+          [
+            {
+              text: "👤 Товар на человеке",
+              callback_data: "mode_person"
+            }
+          ],
+
+          [
+            {
+              text: "📱 Креатив для соцсетей",
+              callback_data: "mode_social"
+            }
+          ]
+        ]
+      }
+    );
+
+    return;
+  }
 
   await sendMessage(
     chatId,
@@ -405,31 +760,75 @@ A polished visual ready for Instagram, Stories or advertising.
 
 👇 Choose an option:
 `,
-    keyboard
+    {
+      inline_keyboard: [
+        [
+          {
+            text: "📸 Product Photo",
+            callback_data: "mode_product"
+          }
+        ],
+
+        [
+          {
+            text: "🖼 Ad Collage · 3 Shots",
+            callback_data: "mode_collage"
+          }
+        ],
+
+        [
+          {
+            text: "👗 Fashion Collage",
+            callback_data: "mode_fashion"
+          }
+        ],
+
+        [
+          {
+            text: "👤 Product on Person",
+            callback_data: "mode_person"
+          }
+        ],
+
+        [
+          {
+            text: "📱 Social Media Creative",
+            callback_data: "mode_social"
+          }
+        ]
+      ]
+    }
   );
 }
 
 // ======================================================
-// STYLE SELECTOR
+// STYLE
 // ======================================================
 
 async function showStyleSelector(
   chatId,
-  mode
+  mode,
+  lang
 ) {
   const keyboard = {
     inline_keyboard: [
       [
         {
           text:
-            "🤍 Clean Studio",
+            lang === "ru"
+              ? "🤍 Чистая студия"
+              : "🤍 Clean Studio",
+
           callback_data:
             "style_clean"
         },
 
         {
           text:
-            "✨ Luxury",
+            lang === "ru"
+              ? "✨ Люкс"
+              : "✨ Luxury",
+
           callback_data:
             "style_luxury"
         }
@@ -438,14 +837,20 @@ async function showStyleSelector(
       [
         {
           text:
-            "🏠 Lifestyle",
+            lang === "ru"
+              ? "🏠 Lifestyle"
+              : "🏠 Lifestyle",
+
           callback_data:
             "style_lifestyle"
         },
 
         {
           text:
-            "📱 Instagram Ad",
+            lang === "ru"
+              ? "📱 Instagram-реклама"
+              : "📱 Instagram Ad",
+
           callback_data:
             "style_instagram"
         }
@@ -454,13 +859,83 @@ async function showStyleSelector(
       [
         {
           text:
-            "🌿 Natural",
+            lang === "ru"
+              ? "🌿 Натуральный"
+              : "🌿 Natural",
+
           callback_data:
             "style_natural"
         }
       ]
     ]
   };
+
+  if (lang === "ru") {
+    let intro = `
+Отлично. ✅
+
+Теперь выберите визуальный стиль:
+`;
+
+    if (mode === "collage") {
+      intro = `
+🖼 <b>Рекламный коллаж</b>
+
+Я создам одно изображение из <b>3 согласованных рекламных кадров</b>.
+
+Выберите общий визуальный стиль:
+`;
+    }
+
+    if (mode === "fashion") {
+      intro = `
+👗 <b>Fashion-коллаж</b>
+
+Коллаж будет включать:
+
+• общий fashion-кадр
+• крупный план товара / детали
+• альтернативную позу или реальный вид сзади, если он загружен
+
+Выберите стиль:
+`;
+    }
+
+    if (mode === "person") {
+      intro = `
+👤 <b>Товар на человеке</b>
+
+Я постараюсь максимально сохранить:
+
+• черты лица
+• форму лица
+• пропорции тела
+• оттенок кожи
+• волосы
+• возраст
+
+Выберите рекламный стиль:
+`;
+    }
+
+    if (mode === "social") {
+      intro = `
+📱 <b>Креатив для соцсетей</b>
+
+Создам рекламный визуал, который хорошо смотрится в социальных сетях.
+
+Выберите стиль:
+`;
+    }
+
+    await sendMessage(
+      chatId,
+      intro,
+      keyboard
+    );
+
+    return;
+  }
 
   let intro = `
 Great. ✅
@@ -529,65 +1004,70 @@ Now choose the visual style:
 }
 
 // ======================================================
-// FORMAT SELECTOR
+// FORMAT
 // ======================================================
 
 async function showFormatSelector(
-  chatId
+  chatId,
+  lang
+) {
+  await sendMessage(
+    chatId,
+
+    lang === "ru"
+      ? `
+Отлично. 🎨
+
+Теперь выберите формат:
+`
+      : `
+Perfect. 🎨
+
+Now choose the image format:
+`,
+
+    {
+      inline_keyboard: [
+        [
+          {
+            text: "⬜ Square 1:1",
+            callback_data: "format_square"
+          }
+        ],
+
+        [
+          {
+            text: "📱 Instagram 4:5",
+            callback_data: "format_portrait"
+          }
+        ],
+
+        [
+          {
+            text: "🎬 Story / Reels 9:16",
+            callback_data: "format_story"
+          }
+        ]
+      ]
+    }
+  );
+}
+
+// ======================================================
+// BUY CREDITS
+// ======================================================
+
+async function showBuyCredits(
+  chatId,
+  lang
 ) {
   const keyboard = {
     inline_keyboard: [
       [
         {
           text:
-            "⬜ Square 1:1",
-          callback_data:
-            "format_square"
-        }
-      ],
-
-      [
-        {
-          text:
-            "📱 Instagram 4:5",
-          callback_data:
-            "format_portrait"
-        }
-      ],
-
-      [
-        {
-          text:
-            "🎬 Story / Reels 9:16",
-          callback_data:
-            "format_story"
-        }
-      ]
-    ]
-  };
-
-  await sendMessage(
-    chatId,
-    `
-Perfect. 🎨
-
-Now choose the image format:
-`,
-    keyboard
-  );
-}
-
-// ======================================================
-// BUY PHOTO PACKS
-// ======================================================
-
-async function showBuyCredits(chatId) {
-  const keyboard = {
-    inline_keyboard: [
-      [
-        {
-          text:
             "⭐ 7 Photos · 275 Stars · ≈ €6.25",
+
           callback_data:
             "buy_7"
         }
@@ -597,6 +1077,7 @@ async function showBuyCredits(chatId) {
         {
           text:
             "✨ 20 Photos · 750 Stars · ≈ €17",
+
           callback_data:
             "buy_20"
         }
@@ -606,12 +1087,45 @@ async function showBuyCredits(chatId) {
         {
           text:
             "🔥 50 Photos · 1,800 Stars · ≈ €41",
+
           callback_data:
             "buy_50"
         }
       ]
     ]
   };
+
+  if (lang === "ru") {
+    await sendMessage(
+      chatId,
+      `
+✨ <b>Выберите пакет</b>
+
+<b>⭐ Starter — 7 фото</b>
+275 Stars · ≈ €6.25
+≈ €0.89 за фото
+
+<b>✨ Creator — 20 фото</b>
+750 Stars · ≈ €17
+≈ €0.85 за фото
+<b>Самый популярный</b>
+
+<b>🔥 Business — 50 фото</b>
+1,800 Stars · ≈ €41
+≈ €0.82 за фото
+<b>Самый выгодный</b>
+
+🖼 Один готовый коллаж считается как <b>1 кредит</b>.
+
+💎 Кредиты не сгорают.
+
+<i>Суммы в EUR приблизительные. Фактическая стоимость Stars в Telegram может отличаться.</i>
+`,
+      keyboard
+    );
+
+    return;
+  }
 
   await sendMessage(
     chatId,
@@ -639,6 +1153,91 @@ async function showBuyCredits(chatId) {
 <i>EUR amounts are approximate. Actual Star prices may vary in Telegram.</i>
 `,
     keyboard
+  );
+}
+
+// ======================================================
+// AFTER GENERATION ACTIONS
+// ======================================================
+
+async function showAfterGenerationActions(
+  chatId,
+  lang
+) {
+  if (lang === "ru") {
+    await sendMessage(
+      chatId,
+      `
+✨ <b>Что дальше?</b>
+`,
+      {
+        inline_keyboard: [
+          [
+            {
+              text: "🔄 Ещё один вариант",
+              callback_data: "action_again"
+            }
+          ],
+
+          [
+            {
+              text: "🎨 Изменить стиль",
+              callback_data: "action_style"
+            },
+
+            {
+              text: "📐 Изменить формат",
+              callback_data: "action_format"
+            }
+          ],
+
+          [
+            {
+              text: "📸 Новый товар",
+              callback_data: "action_new"
+            }
+          ]
+        ]
+      }
+    );
+
+    return;
+  }
+
+  await sendMessage(
+    chatId,
+    `
+✨ <b>What would you like to do next?</b>
+`,
+    {
+      inline_keyboard: [
+        [
+          {
+            text: "🔄 Another Version",
+            callback_data: "action_again"
+          }
+        ],
+
+        [
+          {
+            text: "🎨 Change Style",
+            callback_data: "action_style"
+          },
+
+          {
+            text: "📐 Change Format",
+            callback_data: "action_format"
+          }
+        ],
+
+        [
+          {
+            text: "📸 New Product",
+            callback_data: "action_new"
+          }
+        ]
+      ]
+    }
   );
 }
 
@@ -728,7 +1327,7 @@ Use:
 }
 
 // ======================================================
-// MULTI-REFERENCE PROMPT
+// REFERENCE PROMPT
 // ======================================================
 
 function getReferencePrompt(
@@ -738,7 +1337,7 @@ function getReferencePrompt(
     return `
 REFERENCE IMAGE RULES:
 
-The uploaded image is the primary visual truth for the real product and any person visible in it.
+The uploaded image is the primary visual truth for the real product and any real person visible in it.
 `;
   }
 
@@ -747,11 +1346,11 @@ MULTIPLE REFERENCE IMAGE RULES:
 
 You are receiving ${referenceCount} reference images.
 
-Treat them as different views or details of the SAME real product unless the visual evidence clearly indicates otherwise.
+Treat them as different views or details of the SAME real product unless visual evidence clearly indicates otherwise.
 
 Reference image 1 is the PRIMARY composition and identity reference.
 
-Reference images 2 and 3 may provide additional factual information such as:
+Reference images 2 and 3 may provide factual information such as:
 
 - back design
 - side view
@@ -770,7 +1369,7 @@ DO NOT merge different views incorrectly.
 
 DO NOT invent a back design if a back reference is supplied.
 
-DO NOT replace a supplied real detail with a newly imagined detail.
+DO NOT replace a supplied real detail with an imagined detail.
 
 When the same person appears in multiple references, treat them as the SAME real person.
 `;
@@ -893,8 +1492,6 @@ USE THE SAME PERSON IN ALL THREE PANELS.
 
 The person's identity must remain visually consistent across all panels.
 
-Do not generate three different interpretations of the same person.
-
 Recommended structure:
 
 PANEL 1 — HERO
@@ -906,21 +1503,13 @@ A closer product shot focused on an important real detail, print, texture, logo 
 PANEL 3 — CONTEXT
 A complementary lifestyle shot, alternative pose or alternative angle.
 
-If multiple product references were supplied, use the factual details they provide.
-
-${referenceCount > 1
-  ? `
-If one reference shows the back or another unique product angle, you may use that exact supplied view in the most appropriate panel.
-`
-  : ""}
+If multiple references were supplied, use their real factual product details.
 
 Do not create more than 3 panels.
 
 Do not create a scrapbook.
 
 Do not repeat exactly the same framing.
-
-Use elegant spacing and professional layout.
 
 No text.
 No prices.
@@ -935,48 +1524,33 @@ CREATE ONE PROFESSIONAL THREE-PANEL FASHION ADVERTISING COLLAGE.
 
 The output must be ONE image containing exactly THREE photographic panels.
 
-This mode is specifically designed for:
+Use the SAME real garment/product throughout all three panels.
 
-- T-shirts
-- dresses
-- hoodies
-- jackets
-- bags
-- footwear
-- jewelry
-- fashion accessories
-
-Use the SAME garment/product throughout all three panels.
-
-If a person is present, use the SAME recognizable person throughout.
+If a real person is present, use the SAME recognizable person throughout all panels.
 
 PANEL 1 — FULL FASHION VIEW
-Show the full styling, silhouette, fit and overall appearance.
+Show the styling, silhouette, fit and overall appearance.
 
 PANEL 2 — PRODUCT DETAIL
-Show the print, fabric, logo, texture, stitching, accessory detail or craftsmanship.
+Show the real print, fabric, logo, texture, stitching or craftsmanship.
 
 PANEL 3 — ALTERNATIVE VIEW
-Show another natural pose, angle, lifestyle moment or back view.
+Show another natural pose, angle, lifestyle moment or real back view.
 
-VERY IMPORTANT:
+If one of the supplied reference images shows the BACK of the garment or product:
 
-If one of the supplied reference images shows the BACK of the garment/product:
-
-Use that exact real back design for Panel 3 where appropriate.
+Use that exact real back design when appropriate.
 
 Do not invent a different back print.
 
-Do not mirror the front artwork onto the back.
+Do not mirror or reinterpret the front print.
 
-Do not invent unseen artwork.
+If no real back reference is supplied, use another front-facing, side or three-quarter pose rather than inventing unseen artwork.
 
-If no back reference is provided, use an alternative front/side pose instead of fabricating the back.
-
-Maintain professional fashion editorial consistency across all three panels.
+Maintain professional fashion editorial consistency.
 
 No text.
-No price tags.
+No prices.
 No watermark.
 `;
   }
@@ -985,13 +1559,13 @@ No watermark.
     return `
 CREATE ONE PROFESSIONAL COMMERCIAL PRODUCT-ON-PERSON PHOTO.
 
-If a person is present in the reference image, that exact person is the identity reference.
+If a person exists in the reference image, that exact person is the identity reference.
 
 Do not replace them with another model.
 
 Keep the real product accurately represented.
 
-You may improve:
+Improve:
 
 - environment
 - professional lighting
@@ -1004,8 +1578,6 @@ Do not significantly alter the person's natural appearance.
 
 The result should look like the same real person photographed during a professional commercial photoshoot.
 
-If no person exists in any supplied reference, create a tasteful commercial human-model context while preserving the exact real product.
-
 No text.
 No watermark.
 `;
@@ -1015,7 +1587,7 @@ No watermark.
     return `
 CREATE ONE PREMIUM SOCIAL MEDIA ADVERTISING CREATIVE.
 
-The result should be immediately usable as a visual for:
+The result should be immediately usable for:
 
 - Instagram
 - Facebook
@@ -1035,9 +1607,9 @@ Do NOT add advertising copy.
 
 Do NOT invent captions, slogans or prices.
 
-Leave visually useful negative space where appropriate so text could be added later externally.
+Leave useful negative space where appropriate.
 
-Preserve any person and product faithfully.
+Preserve the product and any real person faithfully.
 
 No watermark.
 `;
@@ -1059,8 +1631,6 @@ Improve only:
 
 If a person exists in the source, preserve that real person's identity.
 
-The result should look like a genuine professional commercial photoshoot.
-
 No text.
 No captions.
 No watermark.
@@ -1068,7 +1638,7 @@ No watermark.
 }
 
 // ======================================================
-// BUILD FINAL PROMPT
+// BUILD PROMPT
 // ======================================================
 
 function buildPrompt(
@@ -1118,7 +1688,7 @@ Do not add watermark.
 }
 
 // ======================================================
-// DOWNLOAD TELEGRAM PHOTO
+// TELEGRAM IMAGE DOWNLOAD
 // ======================================================
 
 async function downloadTelegramPhoto(
@@ -1157,10 +1727,6 @@ async function downloadTelegramPhoto(
   );
 }
 
-// ======================================================
-// DOWNLOAD ALL REFERENCES
-// ======================================================
-
 async function downloadReferencePhotos(
   fileIds
 ) {
@@ -1183,7 +1749,7 @@ async function downloadReferencePhotos(
 }
 
 // ======================================================
-// OPENAI IMAGE GENERATION
+// OPENAI GENERATION
 // ======================================================
 
 async function generateProductPhoto(
@@ -1208,6 +1774,7 @@ async function generateProductPhoto(
         {
           filename:
             `reference-${index + 1}.jpg`,
+
           contentType:
             "image/jpeg"
         }
@@ -1256,7 +1823,8 @@ async function generateProductPhoto(
           ...form.getHeaders()
         },
 
-        timeout: 180000,
+        timeout:
+          180000,
 
         maxContentLength:
           Infinity,
@@ -1292,7 +1860,8 @@ async function generateProductPhoto(
 async function sendPhoto(
   chatId,
   imageBuffer,
-  mode
+  mode,
+  lang
 ) {
   const form =
     new FormData();
@@ -1314,27 +1883,51 @@ async function sendPhoto(
     }
   );
 
-  let caption =
-    "✨ Your AI product photo is ready.";
+  let caption;
 
-  if (mode === "collage") {
-    caption =
-      "🖼 Your advertising collage is ready.";
-  }
+  if (lang === "ru") {
+    const captions = {
+      product:
+        "✨ Ваше профессиональное фото товара готово.",
 
-  if (mode === "fashion") {
-    caption =
-      "👗 Your fashion advertising collage is ready.";
-  }
+      collage:
+        "🖼 Ваш рекламный коллаж готов.",
 
-  if (mode === "person") {
-    caption =
-      "👤 Your professional product-on-person photo is ready.";
-  }
+      fashion:
+        "👗 Ваш fashion-коллаж готов.",
 
-  if (mode === "social") {
+      person:
+        "👤 Ваше профессиональное фото готово.",
+
+      social:
+        "📱 Ваш креатив для соцсетей готов."
+    };
+
     caption =
-      "📱 Your social media creative is ready.";
+      captions[mode] ||
+      captions.product;
+
+  } else {
+    const captions = {
+      product:
+        "✨ Your AI product photo is ready.",
+
+      collage:
+        "🖼 Your advertising collage is ready.",
+
+      fashion:
+        "👗 Your fashion advertising collage is ready.",
+
+      person:
+        "👤 Your professional product-on-person photo is ready.",
+
+      social:
+        "📱 Your social media creative is ready."
+    };
+
+    caption =
+      captions[mode] ||
+      captions.product;
   }
 
   form.append(
@@ -1359,10 +1952,12 @@ async function sendPhoto(
 }
 
 // ======================================================
-// RESERVE CREDIT
+// CREDIT RESERVATION
 // ======================================================
 
-async function reserveCredit(userId) {
+async function reserveCredit(
+  userId
+) {
   const result =
     await pool.query(
       `
@@ -1392,11 +1987,9 @@ async function reserveCredit(userId) {
     .credits;
 }
 
-// ======================================================
-// REFUND CREDIT
-// ======================================================
-
-async function refundCredit(userId) {
+async function refundCredit(
+  userId
+) {
   await pool.query(
     `
     UPDATE users
@@ -1405,10 +1998,286 @@ async function refundCredit(userId) {
       credits = credits + 1,
       updated_at = CURRENT_TIMESTAMP
 
-    WHERE telegram_id = $1
+    WHERE
+      telegram_id = $1
     `,
     [userId]
   );
+}
+
+// ======================================================
+// GENERATION WORKFLOW
+// ======================================================
+
+async function generateForUser(
+  chatId,
+  userId,
+  session,
+  lang
+) {
+  if (
+    !session.photoFileIds ||
+    session.photoFileIds.length === 0
+  ) {
+    await sendMessage(
+      chatId,
+
+      lang === "ru"
+        ? "⚠️ Не могу найти фотографии товара. Загрузите их ещё раз."
+        : "⚠️ I can't find your product photos. Please upload them again."
+    );
+
+    return;
+  }
+
+  if (!session.mode) {
+    await showCreationTypeSelector(
+      chatId,
+      lang
+    );
+
+    return;
+  }
+
+  if (!session.style) {
+    await showStyleSelector(
+      chatId,
+      session.mode,
+      lang
+    );
+
+    return;
+  }
+
+  if (!session.format) {
+    await showFormatSelector(
+      chatId,
+      lang
+    );
+
+    return;
+  }
+
+  const balanceAfterReserve =
+    await reserveCredit(
+      userId
+    );
+
+  if (
+    balanceAfterReserve === null
+  ) {
+    await sendMessage(
+      chatId,
+
+      lang === "ru"
+        ? `
+💎 <b>У вас закончились кредиты.</b>
+
+Выберите пакет, чтобы продолжить.
+`
+        : `
+💎 <b>You’re out of photo credits.</b>
+
+Choose a photo pack to continue.
+`
+    );
+
+    await showBuyCredits(
+      chatId,
+      lang
+    );
+
+    return;
+  }
+
+  console.log(
+    `[DATABASE] User ${userId} reserved 1 credit. Balance: ${balanceAfterReserve}`
+  );
+
+  if (lang === "ru") {
+    await sendMessage(
+      chatId,
+      `
+⏳ <b>Создаю: ${getModeName(session.mode, "ru")}...</b>
+
+Референсов: <b>${session.photoFileIds.length}</b>
+Стиль: <b>${session.style}</b>
+Формат: <b>${session.format}</b>
+
+Обычно это занимает 30–120 секунд.
+`
+    );
+
+  } else {
+    await sendMessage(
+      chatId,
+      `
+⏳ <b>Creating your ${getModeName(session.mode, "en")}...</b>
+
+References: <b>${session.photoFileIds.length}</b>
+Style: <b>${session.style}</b>
+Format: <b>${session.format}</b>
+
+This can take around 30–120 seconds.
+`
+    );
+  }
+
+  let delivered = false;
+
+  try {
+    const referencePhotos =
+      await downloadReferencePhotos(
+        session.photoFileIds
+      );
+
+    log(
+      `Downloaded ${referencePhotos.length} references for user ${userId}`
+    );
+
+    const generatedPhoto =
+      await generateProductPhoto(
+        referencePhotos,
+        session.mode,
+        session.style,
+        session.format
+      );
+
+    log(
+      `OpenAI generation completed for user ${userId}`
+    );
+
+    await sendPhoto(
+      chatId,
+      generatedPhoto,
+      session.mode,
+      lang
+    );
+
+    delivered = true;
+
+    log(
+      `Generated image delivered to user ${userId}`
+    );
+
+  } catch (error) {
+    console.error(
+      "IMAGE GENERATION ERROR:",
+      error.response?.data ||
+      error.message
+    );
+
+    if (!delivered) {
+      try {
+        await refundCredit(
+          userId
+        );
+
+        console.log(
+          `[DATABASE] Refunded 1 credit to user ${userId}`
+        );
+
+      } catch (refundError) {
+        console.error(
+          "[DATABASE] CREDIT REFUND ERROR:",
+          refundError.message
+        );
+      }
+    }
+
+    await sendMessage(
+      chatId,
+
+      lang === "ru"
+        ? `
+⚠️ <b>Не удалось создать изображение.</b>
+
+Кредит возвращён на ваш баланс.
+
+Попробуйте ещё раз.
+`
+        : `
+⚠️ <b>I couldn't generate the image.</b>
+
+Your credit was returned.
+
+Please try again.
+`
+    );
+
+    return;
+  }
+
+  try {
+    await pool.query(
+      `
+      UPDATE users
+
+      SET
+        free_generation_used = TRUE,
+        updated_at = CURRENT_TIMESTAMP
+
+      WHERE
+        telegram_id = $1
+      `,
+      [userId]
+    );
+
+  } catch (error) {
+    console.error(
+      "[DATABASE] Post-generation update error:",
+      error.message
+    );
+  }
+
+  const result =
+    await pool.query(
+      `
+      SELECT credits
+
+      FROM users
+
+      WHERE
+        telegram_id = $1
+      `,
+      [userId]
+    );
+
+  const credits =
+    result.rows[0]?.credits ?? 0;
+
+  if (lang === "ru") {
+    await sendMessage(
+      chatId,
+      `
+✅ <b>Готово!</b>
+
+💎 Осталось: <b>${credits} ${ruCreditWord(credits)}</b>
+`
+    );
+
+  } else {
+    await sendMessage(
+      chatId,
+      `
+✅ <b>Done!</b>
+
+💎 Remaining: <b>${credits} ${creditWord(credits)}</b>
+`
+    );
+  }
+
+  await showAfterGenerationActions(
+    chatId,
+    lang
+  );
+
+  if (credits <= 0) {
+    await showBuyCredits(
+      chatId,
+      lang
+    );
+  }
 }
 
 // ======================================================
@@ -1440,49 +2309,11 @@ app.post(
             query.invoice_payload
           );
 
-        console.log(
-          `[PAYMENT] Pre-checkout from user ${query.from.id}: ${query.invoice_payload}`
-        );
-
-        if (!selectedPackage) {
-          await axios.post(
-            `${TELEGRAM_URL}/answerPreCheckoutQuery`,
-            {
-              pre_checkout_query_id:
-                query.id,
-
-              ok: false,
-
-              error_message:
-                "This package could not be verified. Please try again."
-            }
-          );
-
-          return;
-        }
-
         if (
-          query.currency !== "XTR"
-        ) {
-          await axios.post(
-            `${TELEGRAM_URL}/answerPreCheckoutQuery`,
-            {
-              pre_checkout_query_id:
-                query.id,
-
-              ok: false,
-
-              error_message:
-                "Payment currency could not be verified."
-            }
-          );
-
-          return;
-        }
-
-        if (
+          !selectedPackage ||
+          query.currency !== "XTR" ||
           query.total_amount !==
-          selectedPackage.stars
+            selectedPackage.stars
         ) {
           await axios.post(
             `${TELEGRAM_URL}/answerPreCheckoutQuery`,
@@ -1493,7 +2324,7 @@ app.post(
               ok: false,
 
               error_message:
-                "Payment amount could not be verified."
+                "Payment could not be verified."
             }
           );
 
@@ -1511,7 +2342,7 @@ app.post(
         );
 
         console.log(
-          `[PAYMENT] Pre-checkout approved for user ${query.from.id}`
+          `[PAYMENT] Pre-checkout approved for ${query.from.id}`
         );
 
         return;
@@ -1534,54 +2365,42 @@ app.post(
         const userId =
           message.from.id;
 
+        await ensureUser(
+          message
+        );
+
+        const lang =
+          await getUserLanguage(
+            userId
+          );
+
         const payment =
           message.successful_payment;
 
-        const currency =
-          payment.currency;
-
-        const totalAmount =
-          payment.total_amount;
-
-        const payload =
-          payment.invoice_payload;
-
-        const chargeId =
-          payment.telegram_payment_charge_id;
-
         const selectedPackage =
           getPackageByPayload(
-            payload
+            payment.invoice_payload
           );
-
-        console.log(
-          `[PAYMENT] Successful payment from ${userId}: ${payload}, ${totalAmount} ${currency}`
-        );
-
-        if (!selectedPackage) {
-          await sendMessage(
-            chatId,
-            `
-⚠️ <b>Payment received, but the package could not be identified.</b>
-
-Please contact support and do not pay again.
-`
-          );
-
-          return;
-        }
 
         if (
-          currency !== "XTR" ||
-          totalAmount !==
+          !selectedPackage ||
+          payment.currency !== "XTR" ||
+          payment.total_amount !==
             selectedPackage.stars
         ) {
           await sendMessage(
             chatId,
-            `
-⚠️ Payment could not be verified.
 
-Please contact support and do not pay again.
+            lang === "ru"
+              ? `
+⚠️ Платёж получен, но его не удалось проверить.
+
+Пожалуйста, не оплачивайте повторно и свяжитесь с поддержкой.
+`
+              : `
+⚠️ Payment was received but could not be verified.
+
+Please do not pay again and contact support.
 `
           );
 
@@ -1598,45 +2417,6 @@ Please contact support and do not pay again.
         try {
           await client.query(
             "BEGIN"
-          );
-
-          await client.query(
-            `
-            INSERT INTO users (
-              telegram_id,
-              username,
-              first_name
-            )
-
-            VALUES (
-              $1,
-              $2,
-              $3
-            )
-
-            ON CONFLICT (
-              telegram_id
-            )
-
-            DO UPDATE SET
-              username =
-                EXCLUDED.username,
-
-              first_name =
-                EXCLUDED.first_name,
-
-              updated_at =
-                CURRENT_TIMESTAMP
-            `,
-            [
-              userId,
-
-              message.from
-                .username || null,
-
-              message.from
-                .first_name || null
-            ]
           );
 
           const paymentInsert =
@@ -1668,17 +2448,15 @@ Please contact support and do not pay again.
               `,
               [
                 userId,
-                totalAmount,
+                payment.total_amount,
                 selectedPackage.credits,
-                payload,
-                chargeId
+                payment.invoice_payload,
+                payment.telegram_payment_charge_id
               ]
             );
 
           if (
-            paymentInsert
-              .rows
-              .length === 0
+            paymentInsert.rows.length === 0
           ) {
             duplicatePayment =
               true;
@@ -1732,15 +2510,7 @@ Please contact support and do not pay again.
             await client.query(
               "ROLLBACK"
             );
-
-          } catch (
-            rollbackError
-          ) {
-            console.error(
-              "[PAYMENT] Rollback error:",
-              rollbackError.message
-            );
-          }
+          } catch {}
 
           console.error(
             "[PAYMENT] Processing error:",
@@ -1749,10 +2519,17 @@ Please contact support and do not pay again.
 
           await sendMessage(
             chatId,
-            `
-⚠️ <b>Your payment was received, but credits could not be added automatically.</b>
 
-Please contact support and do not pay again.
+            lang === "ru"
+              ? `
+⚠️ Платёж получен, но кредиты не удалось начислить автоматически.
+
+Пожалуйста, не оплачивайте повторно.
+`
+              : `
+⚠️ Your payment was received, but credits could not be added automatically.
+
+Please do not pay again.
 `
           );
 
@@ -1762,27 +2539,41 @@ Please contact support and do not pay again.
           client.release();
         }
 
-        if (
-          duplicatePayment
-        ) {
+        if (duplicatePayment) {
           await sendMessage(
             chatId,
-            `
-✅ This payment was already processed.
 
-💎 Your balance: <b>${newCredits} ${creditWord(newCredits)}</b>
-`
+            lang === "ru"
+              ? `✅ Этот платёж уже обработан.\n\n💎 Баланс: <b>${newCredits} ${ruCreditWord(newCredits)}</b>`
+              : `✅ This payment was already processed.\n\n💎 Balance: <b>${newCredits} ${creditWord(newCredits)}</b>`
           );
 
           return;
         }
 
-        await sendMessage(
-          chatId,
-          `
+        if (lang === "ru") {
+          await sendMessage(
+            chatId,
+            `
+✅ <b>Оплата прошла успешно!</b>
+
+⭐ Оплачено: <b>${payment.total_amount} Stars</b>
+📸 Добавлено: <b>${selectedPackage.credits} ${ruPhotoWord(selectedPackage.credits)}</b>
+
+💎 Новый баланс:
+<b>${newCredits} ${ruCreditWord(newCredits)}</b>
+
+Отправьте фотографию товара, чтобы продолжить. 📸
+`
+          );
+
+        } else {
+          await sendMessage(
+            chatId,
+            `
 ✅ <b>Payment successful!</b>
 
-⭐ Paid: <b>${totalAmount} Stars</b>
+⭐ Paid: <b>${payment.total_amount} Stars</b>
 📸 Added: <b>${selectedPackage.credits} ${photoWord(selectedPackage.credits)}</b>
 
 💎 Your new balance:
@@ -1790,13 +2581,14 @@ Please contact support and do not pay again.
 
 Send me a product photo to continue. 📸
 `
-        );
+          );
+        }
 
         return;
       }
 
       // ==================================================
-      // CALLBACKS
+      // CALLBACK
       // ==================================================
 
       if (
@@ -1822,51 +2614,91 @@ Send me a product photo to continue. 📸
         );
 
         // ==================================================
-        // ADD ANOTHER REFERENCE
+        // LANGUAGE
+        // ==================================================
+
+        if (
+          data.startsWith(
+            "lang_"
+          )
+        ) {
+          const lang =
+            data === "lang_ru"
+              ? "ru"
+              : "en";
+
+          await setUserLanguage(
+            userId,
+            lang
+          );
+
+          const userData =
+            await getUserData(
+              userId
+            );
+
+          session.photoFileIds =
+            [];
+
+          session.collectingReferences =
+            false;
+
+          resetCreativeSettings(
+            session
+          );
+
+          await showStart(
+            chatId,
+            lang
+          );
+
+          await showBalanceOrPackages(
+            chatId,
+            userData.credits,
+            lang
+          );
+
+          return;
+        }
+
+        const lang =
+          await getUserLanguage(
+            userId
+          );
+
+        // ==================================================
+        // ADD REFERENCE
         // ==================================================
 
         if (
           data === "refs_add"
         ) {
-          if (
-            session.photoFileIds
-              .length >= 3
-          ) {
-            await sendMessage(
-              chatId,
-              `
-✅ You already have the maximum of <b>3 reference photos</b>.
-
-Let's continue.
-`
-            );
-
-            session.collectingReferences =
-              false;
-
-            await showCreationTypeSelector(
-              chatId
-            );
-
-            return;
-          }
-
           session.collectingReferences =
             true;
 
           await sendMessage(
             chatId,
-            `
+
+            lang === "ru"
+              ? `
+➕ <b>Отправьте ещё одну фотографию.</b>
+
+Например:
+
+👕 Спина товара
+🔎 Деталь крупным планом
+📦 Упаковка
+📸 Другой ракурс
+`
+              : `
 ➕ <b>Send another reference photo.</b>
 
-Good examples:
+Examples:
 
 👕 Back of the product
 🔎 Close-up detail
 📦 Packaging
 📸 Another angle
-
-Send the photo now.
 `
           );
 
@@ -1880,23 +2712,12 @@ Send the photo now.
         if (
           data === "refs_done"
         ) {
-          if (
-            session.photoFileIds
-              .length === 0
-          ) {
-            await sendMessage(
-              chatId,
-              "📸 Please upload your product photo first."
-            );
-
-            return;
-          }
-
           session.collectingReferences =
             false;
 
           await showCreationTypeSelector(
-            chatId
+            chatId,
+            lang
           );
 
           return;
@@ -1911,14 +2732,11 @@ Send the photo now.
             "mode_"
           )
         ) {
-          const mode =
+          session.mode =
             data.replace(
               "mode_",
               ""
             );
-
-          session.mode =
-            mode;
 
           session.style =
             null;
@@ -1926,13 +2744,10 @@ Send the photo now.
           session.format =
             null;
 
-          log(
-            `User ${userId} selected mode: ${mode}`
-          );
-
           await showStyleSelector(
             chatId,
-            mode
+            session.mode,
+            lang
           );
 
           return;
@@ -1947,28 +2762,22 @@ Send the photo now.
             "style_"
           )
         ) {
-          const style =
+          session.style =
             data.replace(
               "style_",
               ""
             );
 
-          session.style =
-            style;
-
-          log(
-            `User ${userId} selected style: ${style}`
-          );
-
           await showFormatSelector(
-            chatId
+            chatId,
+            lang
           );
 
           return;
         }
 
         // ==================================================
-        // FORMAT → GENERATE
+        // FORMAT
         // ==================================================
 
         if (
@@ -1976,235 +2785,106 @@ Send the photo now.
             "format_"
           )
         ) {
-          const format =
+          session.format =
             data.replace(
               "format_",
               ""
             );
 
-          session.format =
-            format;
-
-          if (
-            !session.photoFileIds ||
-            session.photoFileIds
-              .length === 0
-          ) {
-            await sendMessage(
-              chatId,
-              "⚠️ I can't find your product photos. Please upload them again."
-            );
-
-            return;
-          }
-
-          if (!session.mode) {
-            await showCreationTypeSelector(
-              chatId
-            );
-
-            return;
-          }
-
-          if (!session.style) {
-            await showStyleSelector(
-              chatId,
-              session.mode
-            );
-
-            return;
-          }
-
-          // ----------------------------------------------
-          // RESERVE CREDIT ATOMICALLY
-          // ----------------------------------------------
-
-          const balanceAfterReserve =
-            await reserveCredit(
-              userId
-            );
-
-          if (
-            balanceAfterReserve ===
-            null
-          ) {
-            await sendMessage(
-              chatId,
-              `
-💎 <b>You’re out of photo credits.</b>
-
-Choose a photo pack to continue creating professional advertising content.
-`
-            );
-
-            await showBuyCredits(
-              chatId
-            );
-
-            return;
-          }
-
-          console.log(
-            `[DATABASE] User ${userId} reserved 1 credit. Balance now: ${balanceAfterReserve}`
-          );
-
-          // ----------------------------------------------
-          // GENERATE
-          // ----------------------------------------------
-
-          await sendMessage(
+          await generateForUser(
             chatId,
-            `
-⏳ <b>Creating your ${getModeName(session.mode)}...</b>
-
-References: <b>${session.photoFileIds.length}</b>
-Style: <b>${session.style}</b>
-Format: <b>${format}</b>
-
-This can take around 30–120 seconds.
-`
+            userId,
+            session,
+            lang
           );
 
-          log(
-            `Generating for user ${userId}: mode=${session.mode}, style=${session.style}, format=${format}, refs=${session.photoFileIds.length}`
+          return;
+        }
+
+        // ==================================================
+        // ACTION — ANOTHER VERSION
+        // ==================================================
+
+        if (
+          data === "action_again"
+        ) {
+          await generateForUser(
+            chatId,
+            userId,
+            session,
+            lang
           );
 
-          let outputDelivered =
+          return;
+        }
+
+        // ==================================================
+        // ACTION — CHANGE STYLE
+        // ==================================================
+
+        if (
+          data === "action_style"
+        ) {
+          await showStyleSelector(
+            chatId,
+            session.mode,
+            lang
+          );
+
+          return;
+        }
+
+        // ==================================================
+        // ACTION — CHANGE FORMAT
+        // ==================================================
+
+        if (
+          data === "action_format"
+        ) {
+          await showFormatSelector(
+            chatId,
+            lang
+          );
+
+          return;
+        }
+
+        // ==================================================
+        // ACTION — NEW PRODUCT
+        // ==================================================
+
+        if (
+          data === "action_new"
+        ) {
+          session.photoFileIds =
+            [];
+
+          session.collectingReferences =
             false;
 
-          try {
-            const referencePhotos =
-              await downloadReferencePhotos(
-                session.photoFileIds
-              );
-
-            log(
-              `Downloaded ${referencePhotos.length} reference image(s) for user ${userId}`
-            );
-
-            const generatedPhoto =
-              await generateProductPhoto(
-                referencePhotos,
-                session.mode,
-                session.style,
-                format
-              );
-
-            log(
-              `OpenAI generation completed for user ${userId}`
-            );
-
-            await sendPhoto(
-              chatId,
-              generatedPhoto,
-              session.mode
-            );
-
-            outputDelivered =
-              true;
-
-            log(
-              `Generated image delivered to user ${userId}`
-            );
-
-            await pool.query(
-              `
-              UPDATE users
-
-              SET
-                free_generation_used =
-                  TRUE,
-
-                updated_at =
-                  CURRENT_TIMESTAMP
-
-              WHERE
-                telegram_id = $1
-              `,
-              [userId]
-            );
-
-          } catch (error) {
-            console.error(
-              "IMAGE GENERATION ERROR:",
-              error.response?.data ||
-              error.message
-            );
-
-            if (!outputDelivered) {
-              try {
-                await refundCredit(
-                  userId
-                );
-
-                console.log(
-                  `[DATABASE] Refunded 1 credit to user ${userId}`
-                );
-
-              } catch (
-                refundError
-              ) {
-                console.error(
-                  "[DATABASE] CREDIT REFUND ERROR:",
-                  refundError.message
-                );
-              }
-            }
-
-            await sendMessage(
-              chatId,
-              `
-⚠️ <b>I couldn't generate the image.</b>
-
-Your credit was <b>returned</b>.
-
-Please try again.
-`
-            );
-
-            return;
-          }
-
-          // ----------------------------------------------
-          // FINAL BALANCE
-          // ----------------------------------------------
-
-          const updatedBalanceResult =
-            await pool.query(
-              `
-              SELECT credits
-
-              FROM users
-
-              WHERE
-                telegram_id = $1
-              `,
-              [userId]
-            );
-
-          const updatedCredits =
-            updatedBalanceResult
-              .rows[0]
-              ?.credits ?? 0;
+          resetCreativeSettings(
+            session
+          );
 
           await sendMessage(
             chatId,
-            `
-✅ <b>Done!</b>
 
-💎 Photos remaining: <b>${updatedCredits}</b>
+            lang === "ru"
+              ? `
+📸 <b>Новый товар</b>
 
-📸 Send a new product photo to start another creation.
+Отправьте первую фотографию нового товара.
+
+Можно загрузить до <b>3 фотографий</b>.
+`
+              : `
+📸 <b>New Product</b>
+
+Send the first photo of your new product.
+
+You can upload up to <b>3 reference photos</b>.
 `
           );
-
-          if (
-            updatedCredits <= 0
-          ) {
-            await showBuyCredits(
-              chatId
-            );
-          }
 
           return;
         }
@@ -2221,16 +2901,19 @@ Please try again.
           const selectedPackage =
             PACKAGES[data];
 
-          if (
-            !selectedPackage
-          ) {
-            await sendMessage(
-              chatId,
-              "⚠️ Package not found."
-            );
-
+          if (!selectedPackage) {
             return;
           }
+
+          const title =
+            lang === "ru"
+              ? selectedPackage.title_ru
+              : selectedPackage.title_en;
+
+          const description =
+            lang === "ru"
+              ? `${selectedPackage.credits} профессиональных AI фото товара`
+              : `${selectedPackage.credits} professional AI product photos`;
 
           await axios.post(
             `${TELEGRAM_URL}/sendInvoice`,
@@ -2238,11 +2921,9 @@ Please try again.
               chat_id:
                 chatId,
 
-              title:
-                selectedPackage.title,
+              title,
 
-              description:
-                `${selectedPackage.credits} professional AI product photos`,
+              description,
 
               payload:
                 selectedPackage.payload,
@@ -2256,17 +2937,13 @@ Please try again.
               prices: [
                 {
                   label:
-                    `${selectedPackage.credits} AI Product Photos`,
+                    title,
 
                   amount:
                     selectedPackage.stars
                 }
               ]
             }
-          );
-
-          console.log(
-            `[PAYMENT] Invoice sent to user ${userId}: ${selectedPackage.credits} credits for ${selectedPackage.stars} Stars`
           );
 
           return;
@@ -2292,8 +2969,37 @@ Please try again.
       const userId =
         message.from.id;
 
+      await ensureUser(
+        message
+      );
+
       const session =
         getSession(userId);
+
+      const userData =
+        await getUserData(
+          userId
+        );
+
+      // ==================================================
+      // /LANGUAGE
+      // ==================================================
+
+      if (
+        message.text &&
+        message.text
+          .trim()
+          .toLowerCase()
+          .startsWith(
+            "/language"
+          )
+      ) {
+        await showLanguageSelector(
+          chatId
+        );
+
+        return;
+      }
 
       // ==================================================
       // /START
@@ -2308,63 +3014,6 @@ Please try again.
             "/start"
           )
       ) {
-        await pool.query(
-          `
-          INSERT INTO users (
-            telegram_id,
-            username,
-            first_name
-          )
-
-          VALUES (
-            $1,
-            $2,
-            $3
-          )
-
-          ON CONFLICT (
-            telegram_id
-          )
-
-          DO UPDATE SET
-            username =
-              EXCLUDED.username,
-
-            first_name =
-              EXCLUDED.first_name,
-
-            updated_at =
-              CURRENT_TIMESTAMP
-          `,
-          [
-            userId,
-
-            message.from
-              .username || null,
-
-            message.from
-              .first_name || null
-          ]
-        );
-
-        const userResult =
-          await pool.query(
-            `
-            SELECT credits
-
-            FROM users
-
-            WHERE
-              telegram_id = $1
-            `,
-            [userId]
-          );
-
-        const credits =
-          userResult
-            .rows[0]
-            .credits;
-
         session.photoFileIds =
           [];
 
@@ -2375,35 +3024,42 @@ Please try again.
           session
         );
 
-        await showStart(
-          chatId
-        );
-
-        if (
-          credits > 0
-        ) {
-          await sendMessage(
-            chatId,
-            `💎 Your balance: <b>${credits} ${creditWord(credits)}</b>`
-          );
-
-        } else {
-          await sendMessage(
-            chatId,
-            `
-💎 You currently have <b>0 photo credits</b>.
-
-Choose a photo pack below to continue creating images.
-`
-          );
-
-          await showBuyCredits(
+        if (!userData.language) {
+          await showLanguageSelector(
             chatId
           );
+
+          return;
         }
+
+        await showStart(
+          chatId,
+          userData.language
+        );
+
+        await showBalanceOrPackages(
+          chatId,
+          userData.credits,
+          userData.language
+        );
 
         return;
       }
+
+      // ==================================================
+      // REQUIRE LANGUAGE FIRST
+      // ==================================================
+
+      if (!userData.language) {
+        await showLanguageSelector(
+          chatId
+        );
+
+        return;
+      }
+
+      const lang =
+        userData.language;
 
       // ==================================================
       // PHOTO
@@ -2416,17 +3072,11 @@ Choose a photo pack below to continue creating images.
       ) {
         const largestPhoto =
           message.photo[
-            message.photo.length -
-              1
+            message.photo.length - 1
           ];
 
-        // ----------------------------------------------
-        // NEW PROJECT
-        // ----------------------------------------------
-
         if (
-          !session
-            .collectingReferences
+          !session.collectingReferences
         ) {
           session.photoFileIds =
             [
@@ -2440,40 +3090,25 @@ Choose a photo pack below to continue creating images.
             session
           );
 
-          log(
-            `New project photo received from user ${userId}`
-          );
-
           await showReferenceOptions(
             chatId,
-            1
+            1,
+            lang
           );
 
           return;
         }
 
-        // ----------------------------------------------
-        // ADDITIONAL REFERENCE
-        // ----------------------------------------------
-
         if (
-          session.photoFileIds
-            .length >= 3
+          session.photoFileIds.length >=
+            3
         ) {
-          await sendMessage(
-            chatId,
-            `
-✅ You already have <b>3 reference photos</b>, which is the maximum.
-
-Let's continue.
-`
-          );
-
           session.collectingReferences =
             false;
 
           await showCreationTypeSelector(
-            chatId
+            chatId,
+            lang
           );
 
           return;
@@ -2483,16 +3118,11 @@ Let's continue.
           largestPhoto.file_id
         );
 
+        const count =
+          session.photoFileIds.length;
+
         resetCreativeSettings(
           session
-        );
-
-        const count =
-          session.photoFileIds
-            .length;
-
-        log(
-          `Additional reference photo received from user ${userId}. Total: ${count}`
         );
 
         if (count >= 3) {
@@ -2501,15 +3131,23 @@ Let's continue.
 
           await sendMessage(
             chatId,
-            `
+
+            lang === "ru"
+              ? `
+✅ <b>3 фотографии сохранены.</b>
+
+Это максимальное количество референсов.
+`
+              : `
 ✅ <b>3 reference photos saved.</b>
 
-Perfect — I now have the maximum number of references.
+That's the maximum number of references.
 `
           );
 
           await showCreationTypeSelector(
-            chatId
+            chatId,
+            lang
           );
 
           return;
@@ -2517,7 +3155,8 @@ Perfect — I now have the maximum number of references.
 
         await showReferenceOptions(
           chatId,
-          count
+          count,
+          lang
         );
 
         return;
@@ -2529,12 +3168,17 @@ Perfect — I now have the maximum number of references.
 
       await sendMessage(
         chatId,
-        `
+
+        lang === "ru"
+          ? `
+📸 Отправьте фотографию товара.
+
+Можно загрузить до <b>3 референсных фото</b>: например перед, спину и деталь.
+`
+          : `
 📸 Please send me a photo of your product.
 
 You can upload up to <b>3 reference photos</b> — for example front, back and detail.
-
-I'll turn them into professional advertising content.
 `
       );
 
