@@ -20,6 +20,13 @@ const TELEGRAM_URL = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
 // ======================================================
 
 const PACKAGES = {
+  test_1: {
+  credits: 1,
+  stars: 5,
+  title: "Test — 1 AI Product Photo",
+  payload: "test_credit_1",
+  eur: "TEST"
+},
   buy_7: {
     credits: 7,
     stars: 275,
