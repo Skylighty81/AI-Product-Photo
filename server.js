@@ -16,6 +16,47 @@ const OPENAI_KEY = process.env.OPENAI_KEY;
 const TELEGRAM_URL = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
 
 // ======================================================
+// PRODUCT PACKAGES
+// ======================================================
+//
+// Prices are defined here ONCE.
+// If we change pricing later, we only change this section.
+//
+
+const PACKAGES = {
+  buy_5: {
+    credits: 5,
+    stars: 275,
+    title: "Starter — 5 AI Product Photos",
+    payload: "credits_5",
+    usd: "≈ $4"
+  },
+
+  buy_15: {
+    credits: 15,
+    stars: 750,
+    title: "Creator — 15 AI Product Photos",
+    payload: "credits_15",
+    usd: "≈ $11"
+  },
+
+  buy_40: {
+    credits: 40,
+    stars: 1800,
+    title: "Business — 40 AI Product Photos",
+    payload: "credits_40",
+    usd: "≈ $25"
+  }
+};
+
+// Find package by Telegram invoice payload.
+function getPackageByPayload(payload) {
+  return Object.values(PACKAGES).find(
+    (item) => item.payload === payload
+  );
+}
+
+// ======================================================
 // DATABASE
 // ======================================================
 
@@ -81,7 +122,11 @@ function log(message) {
 // TELEGRAM HELPERS
 // ======================================================
 
-async function sendMessage(chatId, text, replyMarkup = null) {
+async function sendMessage(
+  chatId,
+  text,
+  replyMarkup = null
+) {
   const payload = {
     chat_id: chatId,
     text,
@@ -98,7 +143,9 @@ async function sendMessage(chatId, text, replyMarkup = null) {
   );
 }
 
-async function answerCallbackQuery(callbackQueryId) {
+async function answerCallbackQuery(
+  callbackQueryId
+) {
   try {
     await axios.post(
       `${TELEGRAM_URL}/answerCallbackQuery`,
@@ -106,6 +153,7 @@ async function answerCallbackQuery(callbackQueryId) {
         callback_query_id: callbackQueryId
       }
     );
+
   } catch (error) {
     console.error(
       "answerCallbackQuery error:",
@@ -130,7 +178,7 @@ Turn an ordinary product photo into a professional advertising image.
 
 I'll keep the product recognizable and create a polished commercial scene around it.
 
-<b>Your first generation is free.</b>
+🎁 <b>Your first generation is free.</b>
 
 👇 Send me a product photo to begin.
 `
@@ -154,6 +202,7 @@ async function showStyleSelector(chatId) {
           callback_data: "style_luxury"
         }
       ],
+
       [
         {
           text: "🏠 Lifestyle",
@@ -164,6 +213,7 @@ async function showStyleSelector(chatId) {
           callback_data: "style_instagram"
         }
       ],
+
       [
         {
           text: "🌿 Natural",
@@ -197,12 +247,14 @@ async function showFormatSelector(chatId) {
           callback_data: "format_square"
         }
       ],
+
       [
         {
           text: "📱 Instagram 4:5",
           callback_data: "format_portrait"
         }
       ],
+
       [
         {
           text: "🎬 Story / Reels 9:16",
@@ -224,7 +276,7 @@ Now choose the image format:
 }
 
 // ======================================================
-// BUY CREDITS SCREEN
+// BUY PHOTO PACKS
 // ======================================================
 
 async function showBuyCredits(chatId) {
@@ -232,19 +284,21 @@ async function showBuyCredits(chatId) {
     inline_keyboard: [
       [
         {
-          text: "⭐ 75 — 5 images",
+          text: "⭐ 5 Photos · 275 Stars · ≈ $4",
           callback_data: "buy_5"
         }
       ],
+
       [
         {
-          text: "⭐ 180 — 15 images",
+          text: "✨ 15 Photos · 750 Stars · ≈ $11",
           callback_data: "buy_15"
         }
       ],
+
       [
         {
-          text: "⭐ 390 — 40 images",
+          text: "🔥 40 Photos · 1,800 Stars · ≈ $25",
           callback_data: "buy_40"
         }
       ]
@@ -254,15 +308,31 @@ async function showBuyCredits(chatId) {
   await sendMessage(
     chatId,
     `
-💎 <b>Buy credits</b>
+✨ <b>Choose your photo pack</b>
 
-Choose the package that works for you:
+Turn your product photos into professional advertising content.
 
-⭐ <b>75 Stars</b> — 5 images
-⭐ <b>180 Stars</b> — 15 images
-⭐ <b>390 Stars</b> — 40 images
+<b>⭐ Starter — 5 Photos</b>
+275 Stars · ≈ $4
 
-Your credits never expire.
+<b>✨ Creator — 15 Photos</b>
+750 Stars · ≈ $11
+<b>Most Popular</b>
+
+<b>🔥 Business — 40 Photos</b>
+1,800 Stars · ≈ $25
+<b>Best Value</b>
+
+Use your photos for:
+
+📱 Social media
+🛍 Online shops
+📦 Marketplaces
+📣 Advertising
+
+💎 Your credits never expire.
+
+<i>USD amounts are approximate. The actual price of Telegram Stars may vary.</i>
 `,
     keyboard
   );
@@ -294,7 +364,6 @@ function getSize(format) {
 
 function getStylePrompt(style) {
   const styles = {
-
     clean: `
 Create a premium clean studio product photograph.
 Use a minimal light neutral studio background.
@@ -414,7 +483,9 @@ async function downloadTelegramPhoto(fileId) {
     }
   );
 
-  return Buffer.from(imageResponse.data);
+  return Buffer.from(
+    imageResponse.data
+  );
 }
 
 // ======================================================
@@ -561,16 +632,92 @@ app.post(
         const query =
           update.pre_checkout_query;
 
+        const selectedPackage =
+          getPackageByPayload(
+            query.invoice_payload
+          );
+
         console.log(
           `[PAYMENT] Pre-checkout from user ${query.from.id}: ${query.invoice_payload}`
         );
 
+        // ----------------------------------------------
+        // VERIFY PACKAGE
+        // ----------------------------------------------
+
+        if (!selectedPackage) {
+          console.error(
+            `[PAYMENT] Unknown pre-checkout payload: ${query.invoice_payload}`
+          );
+
+          await axios.post(
+            `${TELEGRAM_URL}/answerPreCheckoutQuery`,
+            {
+              pre_checkout_query_id: query.id,
+              ok: false,
+              error_message:
+                "This package could not be verified. Please try again."
+            }
+          );
+
+          return;
+        }
+
+        // ----------------------------------------------
+        // VERIFY CURRENCY
+        // ----------------------------------------------
+
+        if (query.currency !== "XTR") {
+          console.error(
+            `[PAYMENT] Invalid pre-checkout currency: ${query.currency}`
+          );
+
+          await axios.post(
+            `${TELEGRAM_URL}/answerPreCheckoutQuery`,
+            {
+              pre_checkout_query_id: query.id,
+              ok: false,
+              error_message:
+                "Payment currency could not be verified."
+            }
+          );
+
+          return;
+        }
+
+        // ----------------------------------------------
+        // VERIFY AMOUNT
+        // ----------------------------------------------
+
+        if (
+          query.total_amount !==
+          selectedPackage.stars
+        ) {
+          console.error(
+            `[PAYMENT] Invalid pre-checkout amount. Expected ${selectedPackage.stars}, received ${query.total_amount}`
+          );
+
+          await axios.post(
+            `${TELEGRAM_URL}/answerPreCheckoutQuery`,
+            {
+              pre_checkout_query_id: query.id,
+              ok: false,
+              error_message:
+                "Payment amount could not be verified."
+            }
+          );
+
+          return;
+        }
+
+        // ----------------------------------------------
+        // APPROVE
+        // ----------------------------------------------
+
         await axios.post(
           `${TELEGRAM_URL}/answerPreCheckoutQuery`,
           {
-            pre_checkout_query_id:
-              query.id,
-
+            pre_checkout_query_id: query.id,
             ok: true
           }
         );
@@ -586,7 +733,9 @@ app.post(
       // TELEGRAM STARS — SUCCESSFUL PAYMENT
       // ==================================================
 
-      if (update.message?.successful_payment) {
+      if (
+        update.message?.successful_payment
+      ) {
         const message =
           update.message;
 
@@ -615,29 +764,13 @@ app.post(
           `[PAYMENT] Successful payment received from user ${userId}: ${payload}, ${totalAmount} ${currency}`
         );
 
-        const packages = {
-
-          credits_5: {
-            credits: 5,
-            stars: 75
-          },
-
-          credits_15: {
-            credits: 15,
-            stars: 180
-          },
-
-          credits_40: {
-            credits: 40,
-            stars: 390
-          }
-        };
-
         const selectedPackage =
-          packages[payload];
+          getPackageByPayload(
+            payload
+          );
 
         // ----------------------------------------------
-        // SAFETY CHECK 1 — KNOWN PACKAGE
+        // SAFETY CHECK 1 — PACKAGE
         // ----------------------------------------------
 
         if (!selectedPackage) {
@@ -705,60 +838,13 @@ Please contact support.
         const client =
           await pool.connect();
 
+        let newCredits = null;
+        let duplicatePayment = false;
+
         try {
           await client.query(
             "BEGIN"
           );
-
-          // ----------------------------------------------
-          // DUPLICATE PAYMENT PROTECTION
-          // ----------------------------------------------
-
-          const existingPayment =
-            await client.query(
-              `
-              SELECT id
-              FROM payments
-              WHERE telegram_payment_charge_id = $1
-              `,
-              [chargeId]
-            );
-
-          if (
-            existingPayment.rows.length > 0
-          ) {
-            await client.query(
-              "ROLLBACK"
-            );
-
-            console.log(
-              `[PAYMENT] Duplicate payment ignored: ${chargeId}`
-            );
-
-            const balanceResult =
-              await pool.query(
-                `
-                SELECT credits
-                FROM users
-                WHERE telegram_id = $1
-                `,
-                [userId]
-              );
-
-            const currentCredits =
-              balanceResult.rows[0]?.credits ?? 0;
-
-            await sendMessage(
-              chatId,
-              `
-✅ This payment was already processed.
-
-💎 Your balance: <b>${currentCredits} credits</b>
-`
-            );
-
-            return;
-          }
 
           // ----------------------------------------------
           // MAKE SURE USER EXISTS
@@ -794,116 +880,135 @@ Please contact support.
             `,
             [
               userId,
-              message.from.username ||
-                null,
-              message.from.first_name ||
-                null
+              message.from.username || null,
+              message.from.first_name || null
             ]
           );
 
           // ----------------------------------------------
-          // SAVE PAYMENT
+          // SAVE PAYMENT SAFELY
           // ----------------------------------------------
 
-          await client.query(
-            `
-            INSERT INTO payments (
-              telegram_id,
-              stars,
-              credits_added,
-              invoice_payload,
-              telegram_payment_charge_id
-            )
-
-            VALUES (
-              $1,
-              $2,
-              $3,
-              $4,
-              $5
-            )
-            `,
-            [
-              userId,
-              totalAmount,
-              selectedPackage.credits,
-              payload,
-              chargeId
-            ]
-          );
-
-          // ----------------------------------------------
-          // ADD CREDITS
-          // ----------------------------------------------
-
-          await client.query(
-            `
-            UPDATE users
-
-            SET
-              credits =
-                credits + $1,
-
-              updated_at =
-                CURRENT_TIMESTAMP
-
-            WHERE telegram_id = $2
-            `,
-            [
-              selectedPackage.credits,
-              userId
-            ]
-          );
-
-          // ----------------------------------------------
-          // GET NEW BALANCE
-          // ----------------------------------------------
-
-          const balanceResult =
+          const paymentInsert =
             await client.query(
               `
-              SELECT credits
-              FROM users
-              WHERE telegram_id = $1
+              INSERT INTO payments (
+                telegram_id,
+                stars,
+                credits_added,
+                invoice_payload,
+                telegram_payment_charge_id
+              )
+
+              VALUES (
+                $1,
+                $2,
+                $3,
+                $4,
+                $5
+              )
+
+              ON CONFLICT (
+                telegram_payment_charge_id
+              )
+
+              DO NOTHING
+
+              RETURNING id
               `,
-              [userId]
+              [
+                userId,
+                totalAmount,
+                selectedPackage.credits,
+                payload,
+                chargeId
+              ]
             );
 
-          const newCredits =
-            balanceResult
-              .rows[0]
-              .credits;
-
           // ----------------------------------------------
-          // COMMIT TRANSACTION
+          // DUPLICATE PAYMENT
           // ----------------------------------------------
 
-          await client.query(
-            "COMMIT"
-          );
+          if (
+            paymentInsert.rows.length === 0
+          ) {
+            duplicatePayment = true;
 
-          console.log(
-            `[PAYMENT] User ${userId} received ${selectedPackage.credits} credits. New balance: ${newCredits}`
-          );
+            const balanceResult =
+              await client.query(
+                `
+                SELECT credits
+                FROM users
+                WHERE telegram_id = $1
+                `,
+                [userId]
+              );
 
-          await sendMessage(
-            chatId,
-            `
-✅ <b>Payment successful!</b>
+            newCredits =
+              balanceResult.rows[0]?.credits ?? 0;
 
-⭐ Paid: <b>${totalAmount} Stars</b>
-💎 Added: <b>${selectedPackage.credits} credits</b>
+            await client.query(
+              "COMMIT"
+            );
 
-Your new balance: <b>${newCredits} credits</b>
+          } else {
 
-📸 Send me a product photo to continue.
-`
-          );
+            // ----------------------------------------------
+            // ADD PURCHASED CREDITS
+            // ----------------------------------------------
+
+            await client.query(
+              `
+              UPDATE users
+
+              SET
+                credits =
+                  credits + $1,
+
+                updated_at =
+                  CURRENT_TIMESTAMP
+
+              WHERE telegram_id = $2
+              `,
+              [
+                selectedPackage.credits,
+                userId
+              ]
+            );
+
+            // ----------------------------------------------
+            // GET NEW BALANCE
+            // ----------------------------------------------
+
+            const balanceResult =
+              await client.query(
+                `
+                SELECT credits
+                FROM users
+                WHERE telegram_id = $1
+                `,
+                [userId]
+              );
+
+            newCredits =
+              balanceResult.rows[0].credits;
+
+            await client.query(
+              "COMMIT"
+            );
+          }
 
         } catch (error) {
-          await client.query(
-            "ROLLBACK"
-          );
+          try {
+            await client.query(
+              "ROLLBACK"
+            );
+          } catch (rollbackError) {
+            console.error(
+              "[PAYMENT] Rollback error:",
+              rollbackError.message
+            );
+          }
 
           console.error(
             "[PAYMENT] Processing error:",
@@ -919,9 +1024,55 @@ Please contact support and do not pay again.
 `
           );
 
+          return;
+
         } finally {
           client.release();
         }
+
+        // ----------------------------------------------
+        // DUPLICATE MESSAGE
+        // ----------------------------------------------
+
+        if (duplicatePayment) {
+          console.log(
+            `[PAYMENT] Duplicate payment ignored: ${chargeId}`
+          );
+
+          await sendMessage(
+            chatId,
+            `
+✅ This payment was already processed.
+
+💎 Your balance: <b>${newCredits} credits</b>
+`
+          );
+
+          return;
+        }
+
+        // ----------------------------------------------
+        // PAYMENT SUCCESS
+        // ----------------------------------------------
+
+        console.log(
+          `[PAYMENT] User ${userId} received ${selectedPackage.credits} credits. New balance: ${newCredits}`
+        );
+
+        await sendMessage(
+          chatId,
+          `
+✅ <b>Payment successful!</b>
+
+⭐ Paid: <b>${totalAmount} Stars</b>
+📸 Added: <b>${selectedPackage.credits} photos</b>
+
+💎 Your new balance:
+<b>${newCredits} credits</b>
+
+Send me a product photo to create your next professional image. 📸
+`
+        );
 
         return;
       }
@@ -1034,9 +1185,7 @@ Please contact support and do not pay again.
           }
 
           const credits =
-            creditResult
-              .rows[0]
-              .credits;
+            creditResult.rows[0].credits;
 
           console.log(
             `[DATABASE] User ${userId} credits before generation: ${credits}`
@@ -1046,12 +1195,14 @@ Please contact support and do not pay again.
           // NO CREDITS
           // ----------------------------------------------
 
-          if (
-            credits <= 0
-          ) {
+          if (credits <= 0) {
             await sendMessage(
               chatId,
-              "💎 <b>You’re out of credits.</b>"
+              `
+💎 <b>You’re out of photo credits.</b>
+
+Choose a photo pack to continue creating professional product images.
+`
             );
 
             await showBuyCredits(
@@ -1112,7 +1263,7 @@ This can take around 30–120 seconds.
             );
 
             // ----------------------------------------------
-            // DEDUCT CREDIT ONLY AFTER SUCCESS
+            // DEDUCT CREDIT AFTER SUCCESS
             // ----------------------------------------------
 
             await pool.query(
@@ -1159,9 +1310,9 @@ This can take around 30–120 seconds.
             await sendMessage(
               chatId,
               `
-✅ Done!
+✅ <b>Done!</b>
 
-💎 Credits remaining: <b>${updatedCredits}</b>
+💎 Photos remaining: <b>${updatedCredits}</b>
 
 📸 Send another product photo to create another version.
 `
@@ -1198,42 +1349,16 @@ Please try again in a moment.
         }
 
         // ==================================================
-        // BUY CREDITS → TELEGRAM STARS INVOICE
+        // BUY PACKAGE → TELEGRAM STARS INVOICE
         // ==================================================
 
         if (
           data.startsWith("buy_")
         ) {
-          const packages = {
-
-            buy_5: {
-              credits: 5,
-              stars: 75,
-              title:
-                "5 AI Product Photos"
-            },
-
-            buy_15: {
-              credits: 15,
-              stars: 180,
-              title:
-                "15 AI Product Photos"
-            },
-
-            buy_40: {
-              credits: 40,
-              stars: 390,
-              title:
-                "40 AI Product Photos"
-            }
-          };
-
           const selectedPackage =
-            packages[data];
+            PACKAGES[data];
 
-          if (
-            !selectedPackage
-          ) {
+          if (!selectedPackage) {
             await sendMessage(
               chatId,
               "⚠️ Package not found."
@@ -1251,10 +1376,10 @@ Please try again in a moment.
                 selectedPackage.title,
 
               description:
-                `${selectedPackage.credits} credits for AI product photo generation`,
+                `${selectedPackage.credits} professional AI product photos`,
 
               payload:
-                `credits_${selectedPackage.credits}`,
+                selectedPackage.payload,
 
               provider_token: "",
 
@@ -1263,7 +1388,7 @@ Please try again in a moment.
               prices: [
                 {
                   label:
-                    selectedPackage.title,
+                    `${selectedPackage.credits} AI Product Photos`,
 
                   amount:
                     selectedPackage.stars
@@ -1348,10 +1473,8 @@ Please try again in a moment.
           `,
           [
             userId,
-            message.from.username ||
-              null,
-            message.from.first_name ||
-              null
+            message.from.username || null,
+            message.from.first_name || null
           ]
         );
 
@@ -1370,9 +1493,7 @@ Please try again in a moment.
           );
 
         const credits =
-          userResult
-            .rows[0]
-            .credits;
+          userResult.rows[0].credits;
 
         console.log(
           `[DATABASE] User ${userId} balance: ${credits}`
@@ -1432,7 +1553,7 @@ Please try again in a moment.
         `
 📸 Please send me a photo of your product.
 
-I'll turn it into a professional product image.
+I'll turn it into a professional advertising image.
 `
       );
 
@@ -1464,8 +1585,7 @@ app.get(
 // ======================================================
 
 const PORT =
-  process.env.PORT ||
-  3000;
+  process.env.PORT || 3000;
 
 app.listen(
   PORT,
