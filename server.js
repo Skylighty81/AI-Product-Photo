@@ -16,33 +16,10 @@ const OPENAI_KEY = process.env.OPENAI_KEY;
 const TELEGRAM_URL = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
 
 // ======================================================
-// ADMIN
-// ======================================================
-
-// Temporary test payment command is available only to you.
-const ADMIN_TELEGRAM_ID = 490608293;
-
-// ======================================================
 // PRODUCT PACKAGES
 // ======================================================
 
 const PACKAGES = {
-  // ----------------------------------------------------
-  // TEMPORARY HIDDEN TEST PACKAGE
-  // ----------------------------------------------------
-
-  test_1: {
-    credits: 1,
-    stars: 5,
-    title: "Test — 1 AI Product Photo",
-    payload: "test_credit_1",
-    eur: "TEST"
-  },
-
-  // ----------------------------------------------------
-  // PUBLIC PACKAGES
-  // ----------------------------------------------------
-
   buy_7: {
     credits: 7,
     stars: 275,
@@ -72,6 +49,18 @@ function getPackageByPayload(payload) {
   return Object.values(PACKAGES).find(
     (item) => item.payload === payload
   );
+}
+
+// ======================================================
+// TEXT HELPERS
+// ======================================================
+
+function photoWord(count) {
+  return count === 1 ? "photo" : "photos";
+}
+
+function creditWord(count) {
+  return count === 1 ? "credit" : "credits";
 }
 
 // ======================================================
@@ -662,6 +651,10 @@ app.post(
         );
 
         if (!selectedPackage) {
+          console.error(
+            `[PAYMENT] Unknown pre-checkout payload: ${query.invoice_payload}`
+          );
+
           await axios.post(
             `${TELEGRAM_URL}/answerPreCheckoutQuery`,
             {
@@ -676,6 +669,10 @@ app.post(
         }
 
         if (query.currency !== "XTR") {
+          console.error(
+            `[PAYMENT] Invalid pre-checkout currency: ${query.currency}`
+          );
+
           await axios.post(
             `${TELEGRAM_URL}/answerPreCheckoutQuery`,
             {
@@ -693,6 +690,10 @@ app.post(
           query.total_amount !==
           selectedPackage.stars
         ) {
+          console.error(
+            `[PAYMENT] Invalid pre-checkout amount. Expected ${selectedPackage.stars}, received ${query.total_amount}`
+          );
+
           await axios.post(
             `${TELEGRAM_URL}/answerPreCheckoutQuery`,
             {
@@ -762,6 +763,10 @@ app.post(
           );
 
         if (!selectedPackage) {
+          console.error(
+            `[PAYMENT] Unknown payload from user ${userId}: ${payload}`
+          );
+
           await sendMessage(
             chatId,
             `
@@ -775,6 +780,10 @@ Please contact support and do not pay again.
         }
 
         if (currency !== "XTR") {
+          console.error(
+            `[PAYMENT] Invalid currency from user ${userId}: ${currency}`
+          );
+
           await sendMessage(
             chatId,
             `
@@ -791,6 +800,10 @@ Please contact support.
           totalAmount !==
           selectedPackage.stars
         ) {
+          console.error(
+            `[PAYMENT] Invalid amount from user ${userId}. Expected ${selectedPackage.stars}, received ${totalAmount}`
+          );
+
           await sendMessage(
             chatId,
             `
@@ -999,7 +1012,7 @@ Please contact support and do not pay again.
         }
 
         // ----------------------------------------------
-        // DUPLICATE PAYMENT MESSAGE
+        // DUPLICATE PAYMENT
         // ----------------------------------------------
 
         if (duplicatePayment) {
@@ -1012,7 +1025,7 @@ Please contact support and do not pay again.
             `
 ✅ This payment was already processed.
 
-💎 Your balance: <b>${newCredits} credits</b>
+💎 Your balance: <b>${newCredits} ${creditWord(newCredits)}</b>
 `
           );
 
@@ -1033,10 +1046,10 @@ Please contact support and do not pay again.
 ✅ <b>Payment successful!</b>
 
 ⭐ Paid: <b>${totalAmount} Stars</b>
-📸 Added: <b>${selectedPackage.credits} photos</b>
+📸 Added: <b>${selectedPackage.credits} ${photoWord(selectedPackage.credits)}</b>
 
 💎 Your new balance:
-<b>${newCredits} credits</b>
+<b>${newCredits} ${creditWord(newCredits)}</b>
 
 Send me a product photo to create your next professional image. 📸
 `
@@ -1157,6 +1170,10 @@ Send me a product photo to create your next professional image. 📸
             `[DATABASE] User ${userId} credits before generation: ${credits}`
           );
 
+          // ----------------------------------------------
+          // NO CREDITS
+          // ----------------------------------------------
+
           if (credits <= 0) {
             await sendMessage(
               chatId,
@@ -1225,7 +1242,7 @@ This can take around 30–120 seconds.
             );
 
             // ----------------------------------------------
-            // DEDUCT 1 CREDIT
+            // DEDUCT CREDIT AFTER SUCCESS
             // ----------------------------------------------
 
             await pool.query(
@@ -1272,7 +1289,7 @@ This can take around 30–120 seconds.
               `
 ✅ <b>Done!</b>
 
-💎 Photos remaining: <b>${updatedCredits}</b>
+💎 ${photoWord(updatedCredits) === "photo" ? "Photo" : "Photos"} remaining: <b>${updatedCredits}</b>
 
 📸 Send another product photo to create another version.
 `
@@ -1309,7 +1326,7 @@ Please try again in a moment.
         }
 
         // ==================================================
-        // PUBLIC BUY PACKAGE
+        // BUY PACKAGE
         // ==================================================
 
         if (
@@ -1386,67 +1403,6 @@ Please try again in a moment.
 
       if (!users[userId]) {
         users[userId] = {};
-      }
-
-      // ==================================================
-      // TEMPORARY HIDDEN TEST PAYMENT
-      // ==================================================
-
-      if (
-        message.text &&
-        message.text
-          .trim()
-          .toLowerCase() === "/testpay"
-      ) {
-
-        // Only your Telegram account can use this command.
-        if (userId !== ADMIN_TELEGRAM_ID) {
-          await sendMessage(
-            chatId,
-            "📸 Please send me a product photo."
-          );
-
-          return;
-        }
-
-        const selectedPackage =
-          PACKAGES.test_1;
-
-        await axios.post(
-          `${TELEGRAM_URL}/sendInvoice`,
-          {
-            chat_id: chatId,
-
-            title:
-              selectedPackage.title,
-
-            description:
-              "Temporary payment test — adds 1 photo credit",
-
-            payload:
-              selectedPackage.payload,
-
-            provider_token: "",
-
-            currency: "XTR",
-
-            prices: [
-              {
-                label:
-                  "1 Test Photo Credit",
-
-                amount:
-                  selectedPackage.stars
-              }
-            ]
-          }
-        );
-
-        console.log(
-          `[PAYMENT TEST] Test invoice sent to user ${userId}: 1 credit for 5 Stars`
-        );
-
-        return;
       }
 
       // ==================================================
@@ -1531,7 +1487,7 @@ Please try again in a moment.
         if (credits > 0) {
           await sendMessage(
             chatId,
-            `💎 Your balance: <b>${credits} credit${credits === 1 ? "" : "s"}</b>`
+            `💎 Your balance: <b>${credits} ${creditWord(credits)}</b>`
           );
 
         } else {
