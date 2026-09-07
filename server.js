@@ -6,16 +6,22 @@ const { Pool } = require("pg");
 const app = express();
 app.use(express.json());
 
+// ======================================================
+// ENV
+// ======================================================
+
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const OPENAI_KEY = process.env.OPENAI_KEY;
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL
-});
+const TELEGRAM_URL = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
 
 // ======================================================
 // DATABASE
 // ======================================================
+
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL
+});
 
 async function initDatabase() {
   try {
@@ -31,28 +37,49 @@ async function initDatabase() {
       )
     `);
 
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS payments (
+        id SERIAL PRIMARY KEY,
+        telegram_id BIGINT NOT NULL,
+        stars INTEGER NOT NULL,
+        credits_added INTEGER NOT NULL,
+        invoice_payload TEXT NOT NULL,
+        telegram_payment_charge_id TEXT UNIQUE NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
     console.log("[DATABASE] PostgreSQL connected successfully");
     console.log("[DATABASE] Users table ready");
+    console.log("[DATABASE] Payments table ready");
+
   } catch (error) {
-    console.error("[DATABASE] Initialization failed:", error.message);
+    console.error(
+      "[DATABASE] Initialization failed:",
+      error.message
+    );
   }
 }
 
 initDatabase();
 
 // ======================================================
-// TELEGRAM
+// TEMPORARY SESSION MEMORY
 // ======================================================
 
-const TELEGRAM_URL = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
-
-// Temporary session memory.
-// Credits and users are already stored permanently in PostgreSQL.
 const users = {};
+
+// ======================================================
+// LOGGING
+// ======================================================
 
 function log(message) {
   console.log(`[PRODUCT PHOTO BOT] ${message}`);
 }
+
+// ======================================================
+// TELEGRAM HELPERS
+// ======================================================
 
 async function sendMessage(chatId, text, replyMarkup = null) {
   const payload = {
@@ -65,14 +92,20 @@ async function sendMessage(chatId, text, replyMarkup = null) {
     payload.reply_markup = replyMarkup;
   }
 
-  return axios.post(`${TELEGRAM_URL}/sendMessage`, payload);
+  return axios.post(
+    `${TELEGRAM_URL}/sendMessage`,
+    payload
+  );
 }
 
 async function answerCallbackQuery(callbackQueryId) {
   try {
-    await axios.post(`${TELEGRAM_URL}/answerCallbackQuery`, {
-      callback_query_id: callbackQueryId
-    });
+    await axios.post(
+      `${TELEGRAM_URL}/answerCallbackQuery`,
+      {
+        callback_query_id: callbackQueryId
+      }
+    );
   } catch (error) {
     console.error(
       "answerCallbackQuery error:",
@@ -112,15 +145,30 @@ async function showStyleSelector(chatId) {
   const keyboard = {
     inline_keyboard: [
       [
-        { text: "🤍 Clean Studio", callback_data: "style_clean" },
-        { text: "✨ Luxury", callback_data: "style_luxury" }
+        {
+          text: "🤍 Clean Studio",
+          callback_data: "style_clean"
+        },
+        {
+          text: "✨ Luxury",
+          callback_data: "style_luxury"
+        }
       ],
       [
-        { text: "🏠 Lifestyle", callback_data: "style_lifestyle" },
-        { text: "📱 Instagram Ad", callback_data: "style_instagram" }
+        {
+          text: "🏠 Lifestyle",
+          callback_data: "style_lifestyle"
+        },
+        {
+          text: "📱 Instagram Ad",
+          callback_data: "style_instagram"
+        }
       ],
       [
-        { text: "🌿 Natural", callback_data: "style_natural" }
+        {
+          text: "🌿 Natural",
+          callback_data: "style_natural"
+        }
       ]
     ]
   };
@@ -144,13 +192,22 @@ async function showFormatSelector(chatId) {
   const keyboard = {
     inline_keyboard: [
       [
-        { text: "⬜ Square 1:1", callback_data: "format_square" }
+        {
+          text: "⬜ Square 1:1",
+          callback_data: "format_square"
+        }
       ],
       [
-        { text: "📱 Instagram 4:5", callback_data: "format_portrait" }
+        {
+          text: "📱 Instagram 4:5",
+          callback_data: "format_portrait"
+        }
       ],
       [
-        { text: "🎬 Story / Reels 9:16", callback_data: "format_story" }
+        {
+          text: "🎬 Story / Reels 9:16",
+          callback_data: "format_story"
+        }
       ]
     ]
   };
@@ -216,9 +273,17 @@ Your credits never expire.
 // ======================================================
 
 function getSize(format) {
-  if (format === "square") return "1024x1024";
-  if (format === "portrait") return "1024x1280";
-  if (format === "story") return "1024x1792";
+  if (format === "square") {
+    return "1024x1024";
+  }
+
+  if (format === "portrait") {
+    return "1024x1280";
+  }
+
+  if (format === "story") {
+    return "1024x1792";
+  }
 
   return "1024x1024";
 }
@@ -229,6 +294,7 @@ function getSize(format) {
 
 function getStylePrompt(style) {
   const styles = {
+
     clean: `
 Create a premium clean studio product photograph.
 Use a minimal light neutral studio background.
@@ -280,11 +346,13 @@ function buildPrompt(style) {
 Use the uploaded image as the exact product reference.
 
 IMPORTANT:
+
 Preserve the product faithfully.
 
 Do not redesign the product.
 
-Do not alter its:
+Do not alter:
+
 - logo
 - branding
 - printed artwork
@@ -300,6 +368,7 @@ Do not alter its:
 The exact product from the reference image must remain clearly recognizable.
 
 Only improve:
+
 - presentation
 - environment
 - lighting
@@ -332,14 +401,18 @@ async function downloadTelegramPhoto(fileId) {
     }
   );
 
-  const filePath = fileResponse.data.result.file_path;
+  const filePath =
+    fileResponse.data.result.file_path;
 
   const fileUrl =
     `https://api.telegram.org/file/bot${TELEGRAM_TOKEN}/${filePath}`;
 
-  const imageResponse = await axios.get(fileUrl, {
-    responseType: "arraybuffer"
-  });
+  const imageResponse = await axios.get(
+    fileUrl,
+    {
+      responseType: "arraybuffer"
+    }
+  );
 
   return Buffer.from(imageResponse.data);
 }
@@ -348,10 +421,17 @@ async function downloadTelegramPhoto(fileId) {
 // OPENAI IMAGE GENERATION
 // ======================================================
 
-async function generateProductPhoto(photoBuffer, style, format) {
+async function generateProductPhoto(
+  photoBuffer,
+  style,
+  format
+) {
   const form = new FormData();
 
-  form.append("model", "gpt-image-2");
+  form.append(
+    "model",
+    "gpt-image-2"
+  );
 
   form.append(
     "image[]",
@@ -362,14 +442,30 @@ async function generateProductPhoto(photoBuffer, style, format) {
     }
   );
 
-  form.append("prompt", buildPrompt(style));
-  form.append("size", getSize(format));
+  form.append(
+    "prompt",
+    buildPrompt(style)
+  );
 
-  // Good MVP balance between cost and image quality.
-  form.append("quality", "medium");
+  form.append(
+    "size",
+    getSize(format)
+  );
 
-  form.append("output_format", "jpeg");
-  form.append("output_compression", "90");
+  form.append(
+    "quality",
+    "medium"
+  );
+
+  form.append(
+    "output_format",
+    "jpeg"
+  );
+
+  form.append(
+    "output_compression",
+    "90"
+  );
 
   const response = await axios.post(
     "https://api.openai.com/v1/images/edits",
@@ -387,23 +483,35 @@ async function generateProductPhoto(photoBuffer, style, format) {
     }
   );
 
-  const imageBase64 = response.data?.data?.[0]?.b64_json;
+  const imageBase64 =
+    response.data?.data?.[0]?.b64_json;
 
   if (!imageBase64) {
-    throw new Error("OpenAI returned no image");
+    throw new Error(
+      "OpenAI returned no image"
+    );
   }
 
-  return Buffer.from(imageBase64, "base64");
+  return Buffer.from(
+    imageBase64,
+    "base64"
+  );
 }
 
 // ======================================================
-// SEND GENERATED IMAGE
+// SEND GENERATED PHOTO
 // ======================================================
 
-async function sendPhoto(chatId, imageBuffer) {
+async function sendPhoto(
+  chatId,
+  imageBuffer
+) {
   const form = new FormData();
 
-  form.append("chat_id", String(chatId));
+  form.append(
+    "chat_id",
+    String(chatId)
+  );
 
   form.append(
     "photo",
@@ -424,6 +532,7 @@ async function sendPhoto(chatId, imageBuffer) {
     form,
     {
       headers: form.getHeaders(),
+
       maxContentLength: Infinity,
       maxBodyLength: Infinity
     }
@@ -434,137 +543,185 @@ async function sendPhoto(chatId, imageBuffer) {
 // WEBHOOK
 // ======================================================
 
-app.post("/webhook", async (req, res) => {
-  // Telegram should receive HTTP 200 immediately.
-  res.sendStatus(200);
+app.post(
+  "/webhook",
+  async (req, res) => {
 
-  try {
-    const update = req.body;
+    // Telegram should receive HTTP 200 immediately
+    res.sendStatus(200);
 
-   // ==================================================
-// TELEGRAM STARS — PRE-CHECKOUT
-// ==================================================
+    try {
+      const update = req.body;
 
-if (update.pre_checkout_query) {
-  const query = update.pre_checkout_query;
+      // ==================================================
+      // TELEGRAM STARS PRE-CHECKOUT
+      // ==================================================
 
-  console.log(
-    `[PAYMENT] Pre-checkout from user ${query.from.id}: ${query.invoice_payload}`
-  );
+      if (update.pre_checkout_query) {
+        const query =
+          update.pre_checkout_query;
 
-  await axios.post(
-    `${TELEGRAM_URL}/answerPreCheckoutQuery`,
-    {
-      pre_checkout_query_id: query.id,
-      ok: true
-    }
-  );
+        console.log(
+          `[PAYMENT] Pre-checkout from user ${query.from.id}: ${query.invoice_payload}`
+        );
 
-  console.log(
-    `[PAYMENT] Pre-checkout approved for user ${query.from.id}`
-  );
+        await axios.post(
+          `${TELEGRAM_URL}/answerPreCheckoutQuery`,
+          {
+            pre_checkout_query_id:
+              query.id,
 
-  return;
-} 
-    // ==================================================
-    // CALLBACK BUTTONS
-    // ==================================================
+            ok: true
+          }
+        );
 
-    if (update.callback_query) {
-      const callback = update.callback_query;
-
-      const chatId = callback.message.chat.id;
-      const userId = callback.from.id;
-      const data = callback.data;
-
-      await answerCallbackQuery(callback.id);
-
-      if (!users[userId]) {
-        users[userId] = {};
-      }
-
-      // ----------------------------------------------
-      // STYLE
-      // ----------------------------------------------
-
-      if (data.startsWith("style_")) {
-        const style = data.replace("style_", "");
-
-        users[userId].style = style;
-
-        log(`User ${userId} selected style: ${style}`);
-
-        await showFormatSelector(chatId);
+        console.log(
+          `[PAYMENT] Pre-checkout approved for user ${query.from.id}`
+        );
 
         return;
       }
 
-      // ----------------------------------------------
-      // FORMAT → GENERATE
-      // ----------------------------------------------
+      // ==================================================
+      // CALLBACK BUTTONS
+      // ==================================================
 
-      if (data.startsWith("format_")) {
-        const format = data.replace("format_", "");
+      if (update.callback_query) {
+        const callback =
+          update.callback_query;
 
-        users[userId].format = format;
+        const chatId =
+          callback.message.chat.id;
 
-        const user = users[userId];
+        const userId =
+          callback.from.id;
 
-        if (!user.photoFileId) {
-          await sendMessage(
-            chatId,
-            "⚠️ I can't find your product photo. Please upload it again."
-          );
+        const data =
+          callback.data;
 
-          return;
-        }
-
-        // --------------------------------------------
-        // CHECK CREDITS
-        // --------------------------------------------
-
-        const creditResult = await pool.query(
-          "SELECT credits FROM users WHERE telegram_id = $1",
-          [userId]
+        await answerCallbackQuery(
+          callback.id
         );
 
-        if (creditResult.rows.length === 0) {
-          await sendMessage(
-            chatId,
-            "⚠️ Please send /start first."
+        if (!users[userId]) {
+          users[userId] = {};
+        }
+
+        // ==================================================
+        // STYLE
+        // ==================================================
+
+        if (
+          data.startsWith("style_")
+        ) {
+          const style =
+            data.replace(
+              "style_",
+              ""
+            );
+
+          users[userId].style =
+            style;
+
+          log(
+            `User ${userId} selected style: ${style}`
+          );
+
+          await showFormatSelector(
+            chatId
           );
 
           return;
         }
 
-        const credits = creditResult.rows[0].credits;
+        // ==================================================
+        // FORMAT → GENERATE
+        // ==================================================
 
-        console.log(
-          `[DATABASE] User ${userId} credits before generation: ${credits}`
-        );
+        if (
+          data.startsWith("format_")
+        ) {
+          const format =
+            data.replace(
+              "format_",
+              ""
+            );
 
-        // --------------------------------------------
-        // NO CREDITS
-        // --------------------------------------------
+          users[userId].format =
+            format;
 
-        if (credits <= 0) {
-          await sendMessage(
-            chatId,
-            "💎 <b>You’re out of credits.</b>"
+          const user =
+            users[userId];
+
+          if (
+            !user.photoFileId
+          ) {
+            await sendMessage(
+              chatId,
+              "⚠️ I can't find your product photo. Please upload it again."
+            );
+
+            return;
+          }
+
+          // ==================================================
+          // CHECK CREDITS
+          // ==================================================
+
+          const creditResult =
+            await pool.query(
+              `
+              SELECT credits
+              FROM users
+              WHERE telegram_id = $1
+              `,
+              [userId]
+            );
+
+          if (
+            creditResult.rows.length === 0
+          ) {
+            await sendMessage(
+              chatId,
+              "⚠️ Please send /start first."
+            );
+
+            return;
+          }
+
+          const credits =
+            creditResult.rows[0].credits;
+
+          console.log(
+            `[DATABASE] User ${userId} credits before generation: ${credits}`
           );
 
-          await showBuyCredits(chatId);
+          // ==================================================
+          // NO CREDITS
+          // ==================================================
 
-          return;
-        }
+          if (
+            credits <= 0
+          ) {
+            await sendMessage(
+              chatId,
+              "💎 <b>You’re out of credits.</b>"
+            );
 
-        // --------------------------------------------
-        // GENERATION START
-        // --------------------------------------------
+            await showBuyCredits(
+              chatId
+            );
 
-        await sendMessage(
-          chatId,
-          `
+            return;
+          }
+
+          // ==================================================
+          // GENERATE
+          // ==================================================
+
+          await sendMessage(
+            chatId,
+            `
 ⏳ <b>Creating your product photo...</b>
 
 Style: <b>${user.style}</b>
@@ -572,298 +729,397 @@ Format: <b>${format}</b>
 
 This can take around 30–120 seconds.
 `
-        );
-
-        log(
-          `Generating for user ${userId}: ${user.style}, ${format}`
-        );
-
-        try {
-          // DOWNLOAD ORIGINAL
-          const originalPhoto =
-            await downloadTelegramPhoto(user.photoFileId);
-
-          log(
-            `Downloaded Telegram image for user ${userId}`
           );
 
-          // OPENAI GENERATION
-          const generatedPhoto =
-            await generateProductPhoto(
-              originalPhoto,
-              user.style,
-              format
+          log(
+            `Generating for user ${userId}: ${user.style}, ${format}`
+          );
+
+          try {
+            const originalPhoto =
+              await downloadTelegramPhoto(
+                user.photoFileId
+              );
+
+            log(
+              `Downloaded Telegram image for user ${userId}`
             );
 
-          log(
-            `OpenAI generation completed for user ${userId}`
-          );
+            const generatedPhoto =
+              await generateProductPhoto(
+                originalPhoto,
+                user.style,
+                format
+              );
 
-          // SEND RESULT
-          await sendPhoto(chatId, generatedPhoto);
+            log(
+              `OpenAI generation completed for user ${userId}`
+            );
 
-          log(
-            `Generated image sent to user ${userId}`
-          );
+            await sendPhoto(
+              chatId,
+              generatedPhoto
+            );
 
-          // ------------------------------------------
-          // DEDUCT CREDIT ONLY AFTER SUCCESS
-          // ------------------------------------------
+            log(
+              `Generated image sent to user ${userId}`
+            );
 
-          await pool.query(
-            `
-            UPDATE users
-            SET
-              credits = GREATEST(credits - 1, 0),
-              free_generation_used = TRUE,
-              updated_at = CURRENT_TIMESTAMP
-            WHERE telegram_id = $1
-            `,
-            [userId]
-          );
+            // ==================================================
+            // DEDUCT CREDIT ONLY AFTER SUCCESS
+            // ==================================================
 
-          const updatedBalanceResult = await pool.query(
-            "SELECT credits FROM users WHERE telegram_id = $1",
-            [userId]
-          );
+            await pool.query(
+              `
+              UPDATE users
+              SET
+                credits = GREATEST(credits - 1, 0),
+                free_generation_used = TRUE,
+                updated_at = CURRENT_TIMESTAMP
+              WHERE telegram_id = $1
+              `,
+              [userId]
+            );
 
-          const updatedCredits =
-            updatedBalanceResult.rows[0].credits;
+            const updatedBalanceResult =
+              await pool.query(
+                `
+                SELECT credits
+                FROM users
+                WHERE telegram_id = $1
+                `,
+                [userId]
+              );
 
-          console.log(
-            `[DATABASE] User ${userId} credit used. New balance: ${updatedCredits}`
-          );
+            const updatedCredits =
+              updatedBalanceResult
+                .rows[0]
+                .credits;
 
-          // ------------------------------------------
-          // AFTER GENERATION
-          // ------------------------------------------
+            console.log(
+              `[DATABASE] User ${userId} credit used. New balance: ${updatedCredits}`
+            );
 
-          await sendMessage(
-            chatId,
-            `
+            // ==================================================
+            // AFTER GENERATION
+            // ==================================================
+
+            await sendMessage(
+              chatId,
+              `
 ✅ Done!
 
 💎 Credits remaining: <b>${updatedCredits}</b>
 
 📸 Send another product photo to create another version.
 `
-          );
+            );
 
-          // If balance is now zero, immediately show packages.
-          if (updatedCredits <= 0) {
-            await showBuyCredits(chatId);
-          }
+            if (
+              updatedCredits <= 0
+            ) {
+              await showBuyCredits(
+                chatId
+              );
+            }
 
-        } catch (error) {
-          console.error(
-            "IMAGE GENERATION ERROR:",
-            error.response?.data || error.message
-          );
+          } catch (error) {
+            console.error(
+              "IMAGE GENERATION ERROR:",
+              error.response?.data ||
+              error.message
+            );
 
-          await sendMessage(
-            chatId,
-            `
+            await sendMessage(
+              chatId,
+              `
 ⚠️ <b>I couldn't generate the image.</b>
 
 Your credit was <b>not charged</b>.
 
 Please try again in a moment.
 `
+            );
+          }
+
+          return;
+        }
+
+        // ==================================================
+        // BUY CREDITS → TELEGRAM STARS
+        // ==================================================
+
+        if (
+          data.startsWith("buy_")
+        ) {
+          const packages = {
+
+            buy_5: {
+              credits: 5,
+              stars: 75,
+              title:
+                "5 AI Product Photos"
+            },
+
+            buy_15: {
+              credits: 15,
+              stars: 180,
+              title:
+                "15 AI Product Photos"
+            },
+
+            buy_40: {
+              credits: 40,
+              stars: 390,
+              title:
+                "40 AI Product Photos"
+            }
+          };
+
+          const selectedPackage =
+            packages[data];
+
+          if (
+            !selectedPackage
+          ) {
+            await sendMessage(
+              chatId,
+              "⚠️ Package not found."
+            );
+
+            return;
+          }
+
+          await axios.post(
+            `${TELEGRAM_URL}/sendInvoice`,
+            {
+              chat_id: chatId,
+
+              title:
+                selectedPackage.title,
+
+              description:
+                `${selectedPackage.credits} credits for AI product photo generation`,
+
+              payload:
+                `credits_${selectedPackage.credits}`,
+
+              provider_token: "",
+
+              currency: "XTR",
+
+              prices: [
+                {
+                  label:
+                    selectedPackage.title,
+
+                  amount:
+                    selectedPackage.stars
+                }
+              ]
+            }
           );
+
+          console.log(
+            `[PAYMENT] Invoice sent to user ${userId}: ${selectedPackage.credits} credits for ${selectedPackage.stars} Stars`
+          );
+
+          return;
         }
 
         return;
       }
 
-      // ----------------------------------------------
-      // BUY BUTTONS
-      // Real Stars payment comes in the next step.
-      // ----------------------------------------------
+      // ==================================================
+      // NORMAL MESSAGE
+      // ==================================================
 
-    if (data.startsWith("buy_")) {
-  const packages = {
-    buy_5: {
-      credits: 5,
-      stars: 75,
-      title: "5 AI Product Photos"
-    },
-    buy_15: {
-      credits: 15,
-      stars: 180,
-      title: "15 AI Product Photos"
-    },
-    buy_40: {
-      credits: 40,
-      stars: 390,
-      title: "40 AI Product Photos"
-    }
-  };
+      const message =
+        update.message;
 
-  const selectedPackage = packages[data];
-
-  if (!selectedPackage) {
-    await sendMessage(chatId, "⚠️ Package not found.");
-    return;
-  }
-
-  await axios.post(`${TELEGRAM_URL}/sendInvoice`, {
-    chat_id: chatId,
-    title: selectedPackage.title,
-    description: `${selectedPackage.credits} credits for AI product photo generation`,
-    payload: `credits_${selectedPackage.credits}`,
-    provider_token: "",
-    currency: "XTR",
-    prices: [
-      {
-        label: selectedPackage.title,
-        amount: selectedPackage.stars
+      if (!message) {
+        return;
       }
-    ]
-  });
 
-  console.log(
-    `[PAYMENT] Invoice sent to user ${userId}: ${selectedPackage.credits} credits for ${selectedPackage.stars} Stars`
-  );
+      const chatId =
+        message.chat.id;
 
-  return;
-}
-      return;
-    }
+      const userId =
+        message.from.id;
 
-    // ==================================================
-    // NORMAL MESSAGE
-    // ==================================================
+      if (!users[userId]) {
+        users[userId] = {};
+      }
 
-    const message = update.message;
+      // ==================================================
+      // /START
+      // ==================================================
 
-    if (!message) {
-      return;
-    }
+      if (
+        message.text &&
+        message.text
+          .trim()
+          .toLowerCase()
+          .startsWith("/start")
+      ) {
+        log(
+          `User ${userId} started the bot`
+        );
 
-    const chatId = message.chat.id;
-    const userId = message.from.id;
+        await pool.query(
+          `
+          INSERT INTO users (
+            telegram_id,
+            username,
+            first_name
+          )
 
-    if (!users[userId]) {
-      users[userId] = {};
-    }
+          VALUES (
+            $1,
+            $2,
+            $3
+          )
 
-    // ==================================================
-    // /START
-    // ==================================================
+          ON CONFLICT (
+            telegram_id
+          )
 
-    if (
-      message.text &&
-      message.text.trim().toLowerCase().startsWith("/start")
-    ) {
-      log(`User ${userId} started the bot`);
+          DO UPDATE SET
+            username =
+              EXCLUDED.username,
 
-      await pool.query(
-        `
-        INSERT INTO users (
-          telegram_id,
-          username,
-          first_name
-        )
-        VALUES ($1, $2, $3)
+            first_name =
+              EXCLUDED.first_name,
 
-        ON CONFLICT (telegram_id)
+            updated_at =
+              CURRENT_TIMESTAMP
+          `,
+          [
+            userId,
+            message.from.username ||
+              null,
+            message.from.first_name ||
+              null
+          ]
+        );
 
-        DO UPDATE SET
-          username = EXCLUDED.username,
-          first_name = EXCLUDED.first_name,
-          updated_at = CURRENT_TIMESTAMP
-        `,
-        [
-          userId,
-          message.from.username || null,
-          message.from.first_name || null
-        ]
-      );
+        console.log(
+          `[DATABASE] User ${userId} saved`
+        );
 
-      console.log(`[DATABASE] User ${userId} saved`);
+        const userResult =
+          await pool.query(
+            `
+            SELECT credits
+            FROM users
+            WHERE telegram_id = $1
+            `,
+            [userId]
+          );
 
-      const userResult = await pool.query(
-        "SELECT credits FROM users WHERE telegram_id = $1",
-        [userId]
-      );
+        const credits =
+          userResult
+            .rows[0]
+            .credits;
 
-      const credits = userResult.rows[0].credits;
+        console.log(
+          `[DATABASE] User ${userId} balance: ${credits}`
+        );
 
-      console.log(
-        `[DATABASE] User ${userId} balance: ${credits}`
-      );
+        await showStart(
+          chatId
+        );
 
-      await showStart(chatId);
+        await sendMessage(
+          chatId,
+          `💎 Your balance: <b>${credits} credit${credits === 1 ? "" : "s"}</b>`
+        );
+
+        return;
+      }
+
+      // ==================================================
+      // PHOTO
+      // ==================================================
+
+      if (
+        message.photo &&
+        message.photo.length > 0
+      ) {
+        const largestPhoto =
+          message.photo[
+            message.photo.length - 1
+          ];
+
+        users[userId].photoFileId =
+          largestPhoto.file_id;
+
+        users[userId].style =
+          null;
+
+        users[userId].format =
+          null;
+
+        log(
+          `Photo received from user ${userId}`
+        );
+
+        await showStyleSelector(
+          chatId
+        );
+
+        return;
+      }
+
+      // ==================================================
+      // FALLBACK
+      // ==================================================
 
       await sendMessage(
         chatId,
-        `💎 Your balance: <b>${credits} credit${credits === 1 ? "" : "s"}</b>`
-      );
-
-      return;
-    }
-
-    // ==================================================
-    // PHOTO
-    // ==================================================
-
-    if (
-      message.photo &&
-      message.photo.length > 0
-    ) {
-      const largestPhoto =
-        message.photo[message.photo.length - 1];
-
-      users[userId].photoFileId =
-        largestPhoto.file_id;
-
-      users[userId].style = null;
-      users[userId].format = null;
-
-      log(
-        `Photo received from user ${userId}`
-      );
-
-      await showStyleSelector(chatId);
-
-      return;
-    }
-
-    // ==================================================
-    // FALLBACK
-    // ==================================================
-
-    await sendMessage(
-      chatId,
-      `
+        `
 📸 Please send me a photo of your product.
 
 I'll turn it into a professional product image.
 `
-    );
+      );
 
-  } catch (error) {
-    console.error(
-      "Webhook error:",
-      error.response?.data || error.message
-    );
+    } catch (error) {
+      console.error(
+        "Webhook error:",
+        error.response?.data ||
+        error.message
+      );
+    }
   }
-});
+);
 
 // ======================================================
 // HEALTH CHECK
 // ======================================================
 
-app.get("/", (req, res) => {
-  res.send("AI Product Photo Bot is running.");
-});
+app.get(
+  "/",
+  (req, res) => {
+    res.send(
+      "AI Product Photo Bot is running."
+    );
+  }
+);
 
 // ======================================================
-// SERVER
+// START SERVER
 // ======================================================
 
-const PORT = process.env.PORT || 3000;
+const PORT =
+  process.env.PORT ||
+  3000;
 
-app.listen(PORT, () => {
-  log(`Server running on port ${PORT}`);
-});
+app.listen(
+  PORT,
+  () => {
+    log(
+      `Server running on port ${PORT}`
+    );
+  }
+);
